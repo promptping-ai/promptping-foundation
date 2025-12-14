@@ -126,48 +126,48 @@ public enum Executable: Sendable, CustomStringConvertible {
     case path(String)
     case name(String)
 
-  /// Validation error type
-  public enum ValidationError: Error, Sendable, LocalizedError {
-    case pathNotAbsolute(String)
-    case nameContainsSlash(String)
-    case emptyValue
+    /// Validation error type
+    public enum ValidationError: Error, Sendable, LocalizedError {
+        case pathNotAbsolute(String)
+        case nameContainsSlash(String)
+        case emptyValue
 
-    public var errorDescription: String? {
-      switch self {
-      case .pathNotAbsolute(let path):
-        return "Path must be absolute (start with /): \(path)"
-      case .nameContainsSlash(let name):
-        return "Executable name cannot contain slashes: \(name)"
-      case .emptyValue:
-        return "Executable path or name cannot be empty"
-      }
+        public var errorDescription: String? {
+            switch self {
+            case .pathNotAbsolute(let path):
+                return "Path must be absolute (start with /): \(path)"
+            case .nameContainsSlash(let name):
+                return "Executable name cannot contain slashes: \(name)"
+            case .emptyValue:
+                return "Executable path or name cannot be empty"
+            }
+        }
     }
-  }
 
-  /// Creates an Executable from an absolute path, validating it starts with /
-  /// - Parameter path: Absolute path to the executable (must start with /)
-  /// - Throws: ValidationError if path is not absolute or empty
-  public static func absolutePath(_ path: String) throws -> Executable {
-    guard !path.isEmpty else { throw ValidationError.emptyValue }
-    guard path.hasPrefix("/") else { throw ValidationError.pathNotAbsolute(path) }
-    return .path(path)
-  }
-
-  /// Creates an Executable from a name for PATH lookup
-  /// - Parameter name: Executable name (no slashes allowed)
-  /// - Throws: ValidationError if name contains slashes or is empty
-  public static func executableName(_ name: String) throws -> Executable {
-    guard !name.isEmpty else { throw ValidationError.emptyValue }
-    guard !name.contains("/") else { throw ValidationError.nameContainsSlash(name) }
-    return .name(name)
-  }
-
-  public var description: String {
-    switch self {
-    case .path(let path): path
-    case .name(let name): name
+    /// Creates an Executable from an absolute path, validating it starts with /
+    /// - Parameter path: Absolute path to the executable (must start with /)
+    /// - Throws: ValidationError if path is not absolute or empty
+    public static func absolutePath(_ path: String) throws -> Executable {
+        guard !path.isEmpty else { throw ValidationError.emptyValue }
+        guard path.hasPrefix("/") else { throw ValidationError.pathNotAbsolute(path) }
+        return .path(path)
     }
-  }
+
+    /// Creates an Executable from a name for PATH lookup
+    /// - Parameter name: Executable name (no slashes allowed)
+    /// - Throws: ValidationError if name contains slashes or is empty
+    public static func executableName(_ name: String) throws -> Executable {
+        guard !name.isEmpty else { throw ValidationError.emptyValue }
+        guard !name.contains("/") else { throw ValidationError.nameContainsSlash(name) }
+        return .name(name)
+    }
+
+    public var description: String {
+        switch self {
+        case .path(let path): path
+        case .name(let name): name
+        }
+    }
 
     /// Common executables
     public static let launchctl = Executable.path("/bin/launchctl")
