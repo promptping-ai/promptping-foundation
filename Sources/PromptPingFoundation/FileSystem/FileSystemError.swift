@@ -67,10 +67,12 @@ public enum FileSystemError: Error, LocalizedError, Sendable {
 
     case .atomicOperationFailed(let operation, let underlying, let rollbackSucceeded):
       let rollbackStatus = rollbackSucceeded ? "rollback succeeded" : "rollback failed"
-      return "Atomic operation '\(operation)' failed (\(rollbackStatus)): \(underlying.localizedDescription)"
+      return
+        "Atomic operation '\(operation)' failed (\(rollbackStatus)): \(underlying.localizedDescription)"
 
     case .rollbackFailed(let originalError, let rollbackError):
-      return "Rollback failed. Original error: \(originalError.localizedDescription). Rollback error: \(rollbackError.localizedDescription)"
+      return
+        "Rollback failed. Original error: \(originalError.localizedDescription). Rollback error: \(rollbackError.localizedDescription)"
     }
   }
 }

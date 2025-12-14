@@ -217,29 +217,29 @@ public actor LaunchAgentManager {
     do {
       let result = try await subprocessRunner.run(
         .launchctl,
-      arguments: ["kill", signal, target]
-    )
-
-    guard result.succeeded else {
-      struct KillCommandError: Error, Sendable {
-        let message: String
-      }
-      throw LaunchAgentError.killFailed(
-        label: label,
-        signal: signal,
-        underlying: KillCommandError(
-          message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
-        )
+        arguments: ["kill", signal, target]
       )
-    }
-  } catch let error as LaunchAgentError {
-    throw error
-  } catch {
-    throw .killFailed(label: label, signal: signal, underlying: error)
-  }
 
-  logger.info("Successfully sent \(signal) to service \(label)")
-}
+      guard result.succeeded else {
+        struct KillCommandError: Error, Sendable {
+          let message: String
+        }
+        throw LaunchAgentError.killFailed(
+          label: label,
+          signal: signal,
+          underlying: KillCommandError(
+            message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          )
+        )
+      }
+    } catch let error as LaunchAgentError {
+      throw error
+    } catch {
+      throw .killFailed(label: label, signal: signal, underlying: error)
+    }
+
+    logger.info("Successfully sent \(signal) to service \(label)")
+  }
 
   // MARK: - Plist Management
 
