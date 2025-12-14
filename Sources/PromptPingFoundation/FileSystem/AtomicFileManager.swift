@@ -157,7 +157,7 @@ public actor AtomicFileManager {
 
             throw .atomicOperationFailed(
                 operation: "atomicInstall",
-                underlying: String(describing: error),
+                underlying: error,
                 rollbackSucceeded: rollbackSucceeded
             )
         }
@@ -181,14 +181,17 @@ public actor AtomicFileManager {
         try createDirectoryIfNeeded(at: url.deletingLastPathComponent())
 
         guard let data = content.data(using: .utf8) else {
-            throw .writeFailed(path: url.path, underlying: "Failed to encode content as UTF-8")
+            struct UTF8EncodingError: Error, Sendable {
+                let message = "Failed to encode content as UTF-8"
+            }
+            throw .writeFailed(path: url.path, underlying: UTF8EncodingError())
         }
 
         do {
             try data.write(to: url, options: .atomic)
             logger.debug("Wrote file atomically", metadata: ["path": "\(url.lastPathComponent)"])
         } catch {
-            throw .writeFailed(path: url.path, underlying: error.localizedDescription)
+            throw .writeFailed(path: url.path, underlying: error)
         }
     }
 
@@ -202,9 +205,12 @@ public actor AtomicFileManager {
             if isDirectory {
                 return  // Already exists as directory
             }
+            struct PathExistsButNotDirectoryError: Error, Sendable {
+                let message = "Path exists but is not a directory"
+            }
             throw .directoryCreationFailed(
                 path: url.path,
-                underlying: "Path exists but is not a directory"
+                underlying: PathExistsButNotDirectoryError()
             )
         }
 
@@ -212,7 +218,7 @@ public actor AtomicFileManager {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
             logger.debug("Created directory", metadata: ["path": "\(url.path)"])
         } catch {
-            throw .directoryCreationFailed(path: url.path, underlying: error.localizedDescription)
+            throw .directoryCreationFailed(path: url.path, underlying: error)
         }
     }
 
@@ -227,7 +233,7 @@ public actor AtomicFileManager {
             throw .copyFailed(
                 source: source.path,
                 destination: destination.path,
-                underlying: error.localizedDescription
+                underlying: error
             )
         }
     }
@@ -247,7 +253,7 @@ public actor AtomicFileManager {
             throw .moveFailed(
                 source: source.path,
                 destination: destination.path,
-                underlying: error.localizedDescription
+                underlying: error
             )
         }
     }
@@ -257,7 +263,7 @@ public actor AtomicFileManager {
         do {
             try fileManager.removeItem(at: url)
         } catch {
-            throw .deleteFailed(path: url.path, underlying: error.localizedDescription)
+            throw .deleteFailed(path: url.path, underlying: error)
         }
     }
 
