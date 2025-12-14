@@ -192,6 +192,8 @@ public actor LaunchAgentManager {
     } catch {
       throw .bootstrapFailed(label: path, underlying: error)
     }
+
+    logger.info("Successfully bootstrapped service from \(path)")
   }
 
   /// Fallback mechanism when bootstrap fails with error 5
