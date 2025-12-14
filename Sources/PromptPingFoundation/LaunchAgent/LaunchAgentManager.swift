@@ -373,7 +373,7 @@ public actor LaunchAgentManager {
       }
       return label
     } catch {
-      logger.warning("Failed to extract label from plist at \(path): \(error)")
+    logger.warning("Failed to extract label from plist at \(path): \(error)")
       return nil
     }
   }
