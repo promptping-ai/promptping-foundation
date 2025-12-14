@@ -3,7 +3,7 @@ import Foundation
 /// Errors that can occur during subprocess execution
 public enum SubprocessError: Error, LocalizedError, Sendable {
   case nonZeroExit(command: String, exitCode: Int32, stderr: String)
-  case executionFailed(command: String, underlying: String)
+  case executionFailed(command: String, underlying: any Error & Sendable)
   case timeout(command: String, timeoutSeconds: Int)
   case environmentNotSupported
 
@@ -16,7 +16,7 @@ public enum SubprocessError: Error, LocalizedError, Sendable {
       }
       return message
     case .executionFailed(let command, let underlying):
-      return "Failed to execute '\(command)': \(underlying)"
+      return "Failed to execute '\(command)': \(underlying.localizedDescription)"
     case .timeout(let command, let seconds):
       return "Command '\(command)' timed out after \(seconds) seconds"
     case .environmentNotSupported:
