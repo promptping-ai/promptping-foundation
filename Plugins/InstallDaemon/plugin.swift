@@ -266,7 +266,8 @@ struct InstallDaemonPlugin: CommandPlugin {
       if process.terminationStatus == 0 {
         Diagnostics.remark("  Service unloaded successfully")
       } else {
-        Diagnostics.warning("  Service may not have been loaded (exit code: \(process.terminationStatus))")
+        Diagnostics.warning(
+          "  Service may not have been loaded (exit code: \(process.terminationStatus))")
       }
     } catch {
       Diagnostics.warning("  Could not unload service: \(error.localizedDescription)")
