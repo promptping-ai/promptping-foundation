@@ -258,10 +258,7 @@ public actor LaunchAgentManager {
       do {
         try fileManager.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
       } catch {
-        throw .plistWriteFailed(
-          path: path,
-          underlying: error
-        )
+        throw .plistWriteFailed(path: path, underlying: error)
       }
     }
 

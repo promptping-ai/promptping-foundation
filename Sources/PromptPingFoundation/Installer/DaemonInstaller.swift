@@ -4,112 +4,100 @@ import Logging
 /// High-level daemon installation orchestrator
 ///
 /// Combines SubprocessRunner, PortManager, AtomicFileManager, and LaunchAgentManager
-/// to provide a complete daemon installation workflow.
+/// to provide a complete daemon installation workflow using the Strategy pattern.
+///
+/// ## Architecture
+///
+/// The installer uses a pipeline of `InstallStep` implementations:
+/// 1. `BuildStep` - Build products (if not skipped)
+/// 2. `PortAllocationStep` - Allocate port (if port config provided)
+/// 3. `StopExistingServiceStep` - Stop existing service (if running)
+/// 4. `InstallBinariesStep` - Install binaries atomically
+/// 5. `InstallPlistStep` - Generate and install plist
+/// 6. `BootstrapServiceStep` - Bootstrap service
+///
+/// Each step is independently testable and can be customized or replaced.
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let installer = DaemonInstaller()
+/// let config = DaemonConfig(
+///     name: "my-daemon",
+///     serviceLabel: "com.myorg.my-daemon",
+///     binaries: [BinaryConfig(name: "my-daemon", sourcePath: buildURL)]
+/// )
+/// let result = try await installer.install(config)
+/// ```
 public actor DaemonInstaller {
-  private let subprocess: SubprocessRunner
-  private let portManager: PortManager
-  private let fileManager: AtomicFileManager
-  private let launchAgentManager: LaunchAgentManager
+  private let context: InstallContext
+  private let steps: [any InstallStep]
   private let logger: Logger
 
+  /// Creates a new daemon installer with default configuration
+  ///
+  /// - Parameter logger: Logger instance for installation logging
   public init(logger: Logger = Logger(label: "promptping.installer")) {
     self.logger = logger
-    self.subprocess = SubprocessRunner(logger: logger)
-    self.portManager = PortManager(logger: logger)
-    self.fileManager = AtomicFileManager(logger: logger)
-    self.launchAgentManager = LaunchAgentManager(
+    let subprocess = SubprocessRunner(logger: logger)
+    let portManager = PortManager(logger: logger)
+    let fileManager = AtomicFileManager(logger: logger)
+    let launchAgentManager = LaunchAgentManager(
       subprocessRunner: subprocess,
       logger: logger
     )
+
+    self.context = InstallContext(
+      subprocess: subprocess,
+      portManager: portManager,
+      fileManager: fileManager,
+      launchAgentManager: launchAgentManager,
+      logger: logger
+    )
+
+    self.steps = [
+      BuildStep(),
+      PortAllocationStep(),
+      StopExistingServiceStep(),
+      InstallBinariesStep(),
+      InstallPlistStep(),
+      BootstrapServiceStep(),
+    ]
+  }
+
+  /// Creates a daemon installer with custom steps
+  ///
+  /// Use this initializer for testing or to customize the installation pipeline.
+  ///
+  /// - Parameters:
+  ///   - context: Installation context with managers
+  ///   - steps: Custom installation steps
+  ///   - logger: Logger instance
+  public init(
+    context: InstallContext,
+    steps: [any InstallStep],
+    logger: Logger = Logger(label: "promptping.installer")
+  ) {
+    self.context = context
+    self.steps = steps
+    self.logger = logger
   }
 
   /// Install a daemon with the given configuration
   ///
-  /// This performs the full installation workflow:
-  /// 1. Build products (if not skipped)
-  /// 2. Allocate port (if port config provided)
-  /// 3. Stop existing service (if running)
-  /// 4. Install binaries atomically
-  /// 5. Generate and install plist
-  /// 6. Bootstrap service
+  /// Executes each installation step in sequence. If any step fails,
+  /// the installation is aborted and the error is propagated.
+  ///
+  /// - Parameter config: Daemon configuration
+  /// - Returns: Installation result with details about what was installed
+  /// - Throws: `InstallerError` if any step fails
   public func install(_ config: DaemonConfig) async throws(InstallerError) -> InstallResult {
     logger.info("Installing daemon: \(config.name)")
     var result = InstallResult(name: config.name)
 
-    // Step 1: Build products (if not skipped)
-    if !config.skipBuild {
-      logger.info("Building products...")
-      let buildDir = try await buildProducts(config)
-      result.buildPath = buildDir
-    }
-
-    // Step 2: Allocate port
-    let port: Int
-    if let portConfig = config.portConfig {
-      port = try await allocatePort(portConfig)
-      result.port = port
-      logger.info("Allocated port: \(port)")
-    } else {
-      port = config.portConfig?.defaultPort ?? 50052
-      result.port = port
-    }
-
-    // Step 3: Stop existing service if running
-    if let serviceConfig = config.serviceConfig {
-      let status = await launchAgentManager.getServiceStatus(serviceConfig.label)
-      if case .running = status {
-        logger.info("Stopping existing service...")
-        do {
-          try await launchAgentManager.bootout(serviceConfig.label)
-          result.previousServiceStopped = true
-        } catch {
-          throw .serviceNotLoaded("Failed to stop \(serviceConfig.label): \(error)")
-        }
-      }
-    }
-
-    // Step 4: Install binaries atomically
-    let swiftpmBin = PathResolver.StandardPath.swiftpmBin.url
-    do {
-      try await fileManager.ensureDirectory(at: swiftpmBin)
-    } catch {
-      throw .binaryNotFound("Failed to create bin directory: \(error)")
-    }
-
-    let operations = config.binaries.map { binary in
-      (source: binary.sourcePath, destination: swiftpmBin.appendingPathComponent(binary.name))
-    }
-
-    do {
-      try await fileManager.atomicInstall(operations)
-    } catch {
-      throw .binaryNotFound("Failed to install binaries: \(error)")
-    }
-    result.binariesInstalled = config.binaries.map(\.name)
-    logger.info("Installed binaries: \(result.binariesInstalled.joined(separator: ", "))")
-
-    // Step 5: Generate and install plist
-    if var serviceConfig = config.serviceConfig {
-      serviceConfig.arguments = updatePortArguments(serviceConfig.arguments, port: port)
-
-      let launchAgentsDir = PathResolver.StandardPath.launchAgents.url
-      let plistURL = launchAgentsDir.appendingPathComponent("\(serviceConfig.label).plist")
-
-      do {
-        try await launchAgentManager.installPlist(config: serviceConfig, to: plistURL)
-      } catch {
-        throw .configurationMissing("Failed to install plist: \(error)")
-      }
-      result.plistPath = plistURL
-      result.serviceInstalled = true
-
-      // Step 6: Bootstrap service
-      do {
-        try await launchAgentManager.bootstrap(plistURL)
-      } catch {
-        throw .serviceNotLoaded("Failed to bootstrap \(serviceConfig.label): \(error)")
-      }
-      logger.info("Service bootstrapped: \(serviceConfig.label)")
+    for step in steps {
+      logger.info("Executing step: \(step.name)")
+      try await step.execute(config: config, context: context, result: &result)
     }
 
     logger.info("Installation complete!")
@@ -117,6 +105,14 @@ public actor DaemonInstaller {
   }
 
   /// Uninstall a daemon
+  ///
+  /// Stops and unloads the service, optionally removing binaries and logs.
+  ///
+  /// - Parameters:
+  ///   - config: Daemon configuration
+  ///   - removeBinaries: Whether to remove installed binaries
+  ///   - removeLogs: Whether to remove log files
+  /// - Throws: `InstallerError` if uninstallation fails
   public func uninstall(
     _ config: DaemonConfig,
     removeBinaries: Bool = false,
@@ -125,14 +121,14 @@ public actor DaemonInstaller {
     logger.info("Uninstalling daemon: \(config.name)")
 
     if let serviceConfig = config.serviceConfig {
-      let status = await launchAgentManager.getServiceStatus(serviceConfig.label)
+      let status = await context.launchAgentManager.getServiceStatus(serviceConfig.label)
       if case .running = status {
         logger.info("Stopping service...")
-        try? await launchAgentManager.kill(serviceConfig.label, signal: "SIGTERM")
+        try? await context.launchAgentManager.kill(serviceConfig.label, signal: "SIGTERM")
       }
 
       do {
-        try await launchAgentManager.bootout(serviceConfig.label)
+        try await context.launchAgentManager.bootout(serviceConfig.label)
       } catch {
         throw .serviceNotLoaded("Failed to unload \(serviceConfig.label): \(error)")
       }
@@ -159,68 +155,6 @@ public actor DaemonInstaller {
     }
 
     logger.info("Uninstall complete!")
-  }
-
-  // MARK: - Private Helpers
-
-  private func buildProducts(_ config: DaemonConfig) async throws(InstallerError) -> URL {
-    var args =
-      config.useSwiftBuild
-      ? ["build", "--build-system", "swiftbuild", "-c", "release"]
-      : ["build", "-c", "release"]
-
-    if let jobs = config.buildJobs {
-      args += ["-j", String(jobs)]
-    }
-
-    do {
-      let result = try await subprocess.run(.swift, arguments: args)
-      guard result.succeeded else {
-        throw InstallerError.buildFailed(result.error)
-      }
-    } catch let error as InstallerError {
-      throw error
-    } catch {
-      throw .buildFailed(error.localizedDescription)
-    }
-
-    let buildDir = Foundation.FileManager.default.currentDirectoryPath
-    return URL(fileURLWithPath: buildDir).appendingPathComponent(".build/release")
-  }
-
-  private func allocatePort(_ portConfig: PortConfig) async throws(InstallerError) -> Int {
-    let defaultInUse = await portManager.isPortInUse(portConfig.defaultPort)
-    if !defaultInUse {
-      return portConfig.defaultPort
-    }
-
-    if let range = portConfig.portRange {
-      do {
-        return try await portManager.findFreePort(in: range, excluding: portConfig.excludedPorts)
-      } catch {
-        throw .portAllocationFailed("No free port in range \(range)")
-      }
-    }
-
-    throw .portAllocationFailed("Default port \(portConfig.defaultPort) is in use")
-  }
-
-  private func updatePortArguments(_ arguments: [String], port: Int) -> [String] {
-    var result = arguments
-    if let portIndex = result.firstIndex(of: "--port") {
-      if portIndex + 1 < result.count {
-        result[portIndex + 1] = String(port)
-      } else {
-        // --port exists but no value follows - append the port value
-        result.append(String(port))
-        logger.warning("Found --port flag without value, appending port \(port)")
-      }
-    } else {
-      // No --port flag found - add it with the value
-      result.append(contentsOf: ["--port", String(port)])
-      logger.info("Added --port \(port) to service arguments")
-    }
-    return result
   }
 }
 
