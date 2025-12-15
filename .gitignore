@@ -12,3 +12,6 @@ DerivedData/
 # macOS
 .DS_Store
 *.swp
+
+# code-search
+search-advice.md
