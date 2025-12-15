@@ -73,7 +73,7 @@ public actor SubprocessRunner {
     } catch {
       throw .executionFailed(
         command: "\(executable.description) \(arguments.joined(separator: " "))",
-        underlying: error.localizedDescription
+        underlying: error
       )
     }
   }

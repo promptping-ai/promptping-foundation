@@ -127,15 +127,20 @@ public actor LaunchAgentManager {
       )
 
       guard result.succeeded else {
+        struct BootstrapCommandError: Error, Sendable {
+          let message: String
+        }
         throw LaunchAgentError.bootstrapFailed(
           label: path,
-          reason: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          underlying: BootstrapCommandError(
+            message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          )
         )
       }
     } catch let error as LaunchAgentError {
       throw error
     } catch {
-      throw .bootstrapFailed(label: path, reason: error.localizedDescription)
+      throw .bootstrapFailed(label: path, underlying: error)
     }
 
     logger.info("Successfully bootstrapped service from \(path)")
@@ -154,15 +159,20 @@ public actor LaunchAgentManager {
 
       // Exit code 3 means "service not found" which is acceptable for bootout
       guard result.succeeded || result.exitCode == 3 else {
+        struct BootoutCommandError: Error, Sendable {
+          let message: String
+        }
         throw LaunchAgentError.bootoutFailed(
           label: label,
-          reason: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          underlying: BootoutCommandError(
+            message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          )
         )
       }
     } catch let error as LaunchAgentError {
       throw error
     } catch {
-      throw .bootoutFailed(label: label, reason: error.localizedDescription)
+      throw .bootoutFailed(label: label, underlying: error)
     }
 
     logger.info("Successfully booted out service \(label)")
@@ -180,15 +190,20 @@ public actor LaunchAgentManager {
       )
 
       guard result.succeeded else {
+        struct KickstartCommandError: Error, Sendable {
+          let message: String
+        }
         throw LaunchAgentError.kickstartFailed(
           label: label,
-          reason: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          underlying: KickstartCommandError(
+            message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+          )
         )
       }
     } catch let error as LaunchAgentError {
       throw error
     } catch {
-      throw .kickstartFailed(label: label, reason: error.localizedDescription)
+      throw .kickstartFailed(label: label, underlying: error)
     }
 
     logger.info("Successfully kickstarted service \(label)")
@@ -202,24 +217,29 @@ public actor LaunchAgentManager {
     do {
       let result = try await subprocessRunner.run(
         .launchctl,
-        arguments: ["kill", signal, target]
-      )
+      arguments: ["kill", signal, target]
+    )
 
-      guard result.succeeded else {
-        throw LaunchAgentError.killFailed(
-          label: label,
-          signal: signal,
-          reason: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
-        )
+    guard result.succeeded else {
+      struct KillCommandError: Error, Sendable {
+        let message: String
       }
-    } catch let error as LaunchAgentError {
-      throw error
-    } catch {
-      throw .killFailed(label: label, signal: signal, reason: error.localizedDescription)
+      throw LaunchAgentError.killFailed(
+        label: label,
+        signal: signal,
+        underlying: KillCommandError(
+          message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+        )
+      )
     }
-
-    logger.info("Successfully sent \(signal) to service \(label)")
+  } catch let error as LaunchAgentError {
+    throw error
+  } catch {
+    throw .killFailed(label: label, signal: signal, underlying: error)
   }
+
+  logger.info("Successfully sent \(signal) to service \(label)")
+}
 
   // MARK: - Plist Management
 
@@ -240,7 +260,7 @@ public actor LaunchAgentManager {
       } catch {
         throw .plistWriteFailed(
           path: path,
-          reason: "Failed to create directory: \(error.localizedDescription)"
+          underlying: error
         )
       }
     }
@@ -248,7 +268,7 @@ public actor LaunchAgentManager {
     do {
       try plistContent.write(to: destination, atomically: true, encoding: .utf8)
     } catch {
-      throw .plistWriteFailed(path: path, reason: error.localizedDescription)
+      throw .plistWriteFailed(path: path, underlying: error)
     }
 
     logger.info("Successfully installed plist for \(config.label)")
