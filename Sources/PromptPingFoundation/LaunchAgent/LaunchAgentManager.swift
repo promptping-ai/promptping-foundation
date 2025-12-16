@@ -192,8 +192,48 @@ public actor LaunchAgentManager {
     } catch {
       throw .bootstrapFailed(label: path, underlying: error)
     }
+  }
 
-    logger.info("Successfully bootstrapped service from \(path)")
+  /// Fallback mechanism when bootstrap fails with error 5
+  ///
+  /// Uses kickstart to ensure the service is running, then verifies status.
+  /// This handles the macOS launchctl quirk where bootstrap returns error 5
+  /// but the service actually starts.
+  private func kickstartFallback(label: String, plistPath: String) async throws(LaunchAgentError) {
+    // First check if service is already running despite the error
+    let initialStatus = await getServiceStatus(label)
+    if case .running(let pid) = initialStatus {
+      logger.info("Service \(label) is already running (PID: \(pid)) despite bootstrap error")
+      return
+    }
+
+    // Try kickstart to force the service to start
+    logger.info("Service not running, attempting kickstart for \(label)")
+
+    do {
+      try await kickstart(label)
+    } catch {
+      // Kickstart failed - service truly didn't start
+      throw .bootstrapFailed(label: plistPath, underlying: error)
+    }
+
+    // Wait briefly and verify service is running
+    try? await Task.sleep(for: .milliseconds(500))
+
+    let finalStatus = await getServiceStatus(label)
+    guard case .running(let pid) = finalStatus else {
+      struct ServiceNotStartedError: Error, Sendable {
+        let message: String
+      }
+      throw .bootstrapFailed(
+        label: plistPath,
+        underlying: ServiceNotStartedError(
+          message: "Service failed to start after kickstart fallback. Status: \(finalStatus)"
+        )
+      )
+    }
+
+    logger.info("Successfully started service \(label) via kickstart fallback (PID: \(pid))")
   }
 
   /// Fallback mechanism when bootstrap fails with error 5
@@ -373,7 +413,7 @@ public actor LaunchAgentManager {
       }
       return label
     } catch {
-    logger.warning("Failed to extract label from plist at \(path): \(error)")
+      logger.warning("Failed to extract label from plist at \(path): \(error)")
       return nil
     }
   }
