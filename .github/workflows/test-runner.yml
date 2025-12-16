@@ -2,12 +2,12 @@ name: Test Self-Hosted Runner
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   test:
-    runs-on: [self-hosted, macos, mac-studio]
+    runs-on: [self-hosted]
     
     steps:
       - name: Checkout code
