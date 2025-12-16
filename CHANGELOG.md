@@ -34,11 +34,19 @@ All notable changes to promptping-foundation will be documented in this file.
 
 - **PortManager** - Port detection and allocation via lsof
 
+- **BumpVersion Library & CLI** - Generic version bump tool for Swift packages
+  - Semantic versioning support (major/minor/patch)
+  - Prerelease versions (alpha/beta/rc)
+  - GitHub release creation via `gh` CLI
+  - CHANGELOG extraction for release notes
+  - Installable globally via `swift package experimental-install`
+
 ### Testing
 
 - Comprehensive unit tests for AtomicBinaryInstaller (8 tests)
 - Integration tests for concurrent and batch operations (12 tests)
 - LaunchAgentManager tests including error 5 handling (8 tests)
+- SemanticVersion and VersionFileManager tests (28 tests)
 
 ### CI/CD
 

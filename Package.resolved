@@ -1,6 +1,15 @@
 {
-  "originHash" : "c7fa5dc45a7681e5fa260f9e8b44e9228395437aa64172352bc4a5e0d231cbae",
+  "originHash" : "fe21658fcfc30a94a8fc8713268b2324ba93d2a2e1ff9ab680a6c03a9a85b96c",
   "pins" : [
+    {
+      "identity" : "semanticversion",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SwiftPackageIndex/SemanticVersion.git",
+      "state" : {
+        "revision" : "3b18d75a3cece558fb98e72d7dd5c83394d86d5b",
+        "version" : "0.5.1"
+      }
+    },
     {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
