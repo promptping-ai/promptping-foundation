@@ -106,10 +106,16 @@ struct InstallDaemonPlugin: CommandPlugin {
     let swiftpmBin = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent(".swiftpm/bin")
 
-    try FileManager.default.createDirectory(
-      at: swiftpmBin,
-      withIntermediateDirectories: true
-    )
+    do {
+      try FileManager.default.createDirectory(
+        at: swiftpmBin,
+        withIntermediateDirectories: true
+      )
+    } catch {
+      throw PluginError.installationFailed(
+        "Failed to create directory \(swiftpmBin.path): \(error.localizedDescription)"
+      )
+    }
 
     // Atomic binary installation using atomic-install-tool
     // (Plugins can't import library targets directly - SE-0303)
@@ -254,15 +260,27 @@ struct InstallDaemonPlugin: CommandPlugin {
     process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
     process.arguments = ["bootout", "gui/\(uid)/\(config.serviceLabel)"]
 
-    try? process.run()
-    process.waitUntilExit()
+    do {
+      try process.run()
+      process.waitUntilExit()
+      if process.terminationStatus == 0 {
+        Diagnostics.remark("  Service unloaded successfully")
+      } else {
+        Diagnostics.warning("  Service may not have been loaded (exit code: \(process.terminationStatus))")
+      }
+    } catch {
+      Diagnostics.warning("  Could not unload service: \(error.localizedDescription)")
+    }
 
     // Remove plist
     let plistPath = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent("Library/LaunchAgents/\(config.serviceLabel).plist")
-    try? FileManager.default.removeItem(at: plistPath)
-
-    Diagnostics.remark("  Service unloaded and plist removed")
+    do {
+      try FileManager.default.removeItem(at: plistPath)
+      Diagnostics.remark("  Plist removed: \(plistPath.path)")
+    } catch {
+      Diagnostics.warning("  Could not remove plist: \(error.localizedDescription)")
+    }
     Diagnostics.remark("  Note: Binaries left in ~/.swiftpm/bin/ (remove manually if needed)")
   }
 

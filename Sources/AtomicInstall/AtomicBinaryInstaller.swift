@@ -5,11 +5,19 @@ public struct InstallResult: Sendable, Equatable {
   public let installedFiles: [String]
   public let backupsCreated: Int
   public let operationID: String
+  /// Paths of backup files that failed to clean up (non-fatal warnings)
+  public let cleanupWarnings: [String]
 
-  public init(installedFiles: [String], backupsCreated: Int, operationID: String) {
+  public init(
+    installedFiles: [String],
+    backupsCreated: Int,
+    operationID: String,
+    cleanupWarnings: [String] = []
+  ) {
     self.installedFiles = installedFiles
     self.backupsCreated = backupsCreated
     self.operationID = operationID
+    self.cleanupWarnings = cleanupWarnings
   }
 }
 
@@ -123,16 +131,21 @@ public struct AtomicBinaryInstaller {
       }
 
       // Phase 4: Cleanup - remove backups on success
-      // Use try? here because cleanup failure shouldn't fail the install
-      // But we should still track it for logging purposes
+      // Track cleanup failures as warnings (non-fatal, doesn't fail the install)
+      var cleanupWarnings: [String] = []
       for (backupURL, _) in backupFiles {
-        try? fileManager.removeItem(at: backupURL)
+        do {
+          try fileManager.removeItem(at: backupURL)
+        } catch {
+          cleanupWarnings.append(backupURL.path)
+        }
       }
 
       return InstallResult(
         installedFiles: operations.map { $0.destination.lastPathComponent },
         backupsCreated: backupFiles.count,
-        operationID: operationID
+        operationID: operationID,
+        cleanupWarnings: cleanupWarnings
       )
 
     } catch let error as InstallError {

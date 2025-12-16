@@ -300,9 +300,6 @@ public actor LaunchAgentManager {
 
     do {
       let result = try await runCommand(.launchctl, ["kill", signal, target], nil)
-        .launchctl,
-        arguments: ["kill", signal, target]
-      )
 
       guard result.succeeded else {
         struct KillCommandError: Error, Sendable {
