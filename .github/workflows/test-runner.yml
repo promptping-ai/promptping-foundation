@@ -1,0 +1,27 @@
+name: Test Self-Hosted Runner
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: [self-hosted, macos, mac-studio]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Print system info
+        run: |
+          echo "🎉 Running on Mac Studio!"
+          echo "Host: $(hostname)"
+          echo "Architecture: $(uname -m)"
+          echo "macOS version: $(sw_vers -productVersion)"
+          echo "CPU info:"
+          sysctl -n machdep.cpu.brand_string
+      
+      - name: Test Swift
+        run: |
+          swift --version
