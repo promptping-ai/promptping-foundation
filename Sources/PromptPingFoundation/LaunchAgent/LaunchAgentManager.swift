@@ -354,22 +354,21 @@ public actor LaunchAgentManager {
 
   // MARK: - Helpers
 
+  /// Minimal plist structure for extracting Label field
+  private struct LaunchAgentPlist: Decodable {
+    let label: String
+
+    enum CodingKeys: String, CodingKey {
+      case label = "Label"
+    }
+  }
+
   private func extractLabel(from plistURL: URL) -> String? {
     let path = plistURL.path
     do {
       let data = try Data(contentsOf: plistURL)
-      guard
-        let plist = try PropertyListSerialization.propertyList(from: data, format: nil)
-          as? [String: Any]
-      else {
-        logger.warning("Plist at \(path) is not a dictionary")
-        return nil
-      }
-      guard let label = plist["Label"] as? String else {
-        logger.warning("Plist at \(path) has no valid 'Label' key")
-        return nil
-      }
-      return label
+      let plist = try PropertyListDecoder().decode(LaunchAgentPlist.self, from: data)
+      return plist.label
     } catch {
       logger.warning("Failed to extract label from plist at \(path): \(error)")
       return nil
