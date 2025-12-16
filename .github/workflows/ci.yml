@@ -8,4 +8,6 @@ on:
 
 jobs:
   test:
-    uses: promptping-ai/.github/.github/workflows/swift-ci.yml@main
+    uses: promptping-ai/.github/.github/workflows/graphite-swift-ci.yml@main
+    secrets:
+      GRAPHITE_CI_TOKEN: ${{ secrets.GRAPHITE_CI_TOKEN }}
