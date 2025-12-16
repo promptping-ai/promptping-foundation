@@ -12,3 +12,9 @@ DerivedData/
 # macOS
 .DS_Store
 *.swp
+
+# code-search
+search-advice.md
+
+# Claude Code local settings
+.claude/settings.local.json
