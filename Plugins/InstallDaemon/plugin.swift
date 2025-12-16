@@ -106,28 +106,83 @@ struct InstallDaemonPlugin: CommandPlugin {
     let swiftpmBin = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent(".swiftpm/bin")
 
-    try FileManager.default.createDirectory(
-      at: swiftpmBin,
-      withIntermediateDirectories: true
-    )
-
-    for artifact in artifacts {
-      let source = artifact.url
-      let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
-
-      // Remove existing
-      try? FileManager.default.removeItem(at: destination)
-
-      // Copy new
-      try FileManager.default.copyItem(at: source, to: destination)
-
-      // Make executable
-      try FileManager.default.setAttributes(
-        [.posixPermissions: 0o755],
-        ofItemAtPath: destination.path
+    do {
+      try FileManager.default.createDirectory(
+        at: swiftpmBin,
+        withIntermediateDirectories: true
       )
+    } catch {
+      throw PluginError.installationFailed(
+        "Failed to create directory \(swiftpmBin.path): \(error.localizedDescription)"
+      )
+    }
 
-      Diagnostics.remark("  Installed: \(artifact.url.lastPathComponent)")
+    // Atomic binary installation using atomic-install-tool
+    // (Plugins can't import library targets directly - SE-0303)
+    Diagnostics.remark("  Installing binaries atomically...")
+
+    let tool = try context.tool(named: "atomic-install-tool")
+
+    // Build operations JSON
+    let operations = artifacts.map { artifact -> [String: String] in
+      let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
+      return [
+        "source": artifact.url.path,
+        "destination": destination.path,
+      ]
+    }
+
+    let operationsJSON: String
+    do {
+      let jsonData = try JSONSerialization.data(withJSONObject: operations, options: [])
+      operationsJSON = String(data: jsonData, encoding: .utf8) ?? "[]"
+    } catch {
+      throw PluginError.installationFailed("Failed to encode operations: \(error)")
+    }
+
+    // Run the atomic install tool
+    let process = Process()
+    process.executableURL = tool.url
+    process.arguments = ["install", "--operations", operationsJSON, "--json"]
+
+    let outputPipe = Pipe()
+    let errorPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = errorPipe
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      throw PluginError.installationFailed("Failed to run atomic-install-tool: \(error)")
+    }
+
+    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+    if process.terminationStatus != 0 {
+      // Tool failed - parse JSON output for detailed error
+      if let output = String(data: outputData, encoding: .utf8), !output.isEmpty {
+        // The tool outputs the full error message with rollback status
+        Diagnostics.error(output)
+      }
+      if let errorOutput = String(data: errorData, encoding: .utf8), !errorOutput.isEmpty {
+        Diagnostics.error(errorOutput)
+      }
+      throw PluginError.installationFailed("Binary installation failed (see above for details)")
+    }
+
+    // Parse success output
+    if let output = String(data: outputData, encoding: .utf8),
+      let jsonData = output.data(using: .utf8),
+      let result = try? JSONDecoder().decode(InstallToolOutput.self, from: jsonData)
+    {
+      for file in result.installedFiles {
+        Diagnostics.remark("    Installed: \(file)")
+      }
+      if result.backupsCreated > 0 {
+        Diagnostics.remark("    Backups created: \(result.backupsCreated)")
+      }
     }
 
     // Generate and install plist (if daemon product specified)
@@ -205,15 +260,27 @@ struct InstallDaemonPlugin: CommandPlugin {
     process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
     process.arguments = ["bootout", "gui/\(uid)/\(config.serviceLabel)"]
 
-    try? process.run()
-    process.waitUntilExit()
+    do {
+      try process.run()
+      process.waitUntilExit()
+      if process.terminationStatus == 0 {
+        Diagnostics.remark("  Service unloaded successfully")
+      } else {
+        Diagnostics.warning("  Service may not have been loaded (exit code: \(process.terminationStatus))")
+      }
+    } catch {
+      Diagnostics.warning("  Could not unload service: \(error.localizedDescription)")
+    }
 
     // Remove plist
     let plistPath = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent("Library/LaunchAgents/\(config.serviceLabel).plist")
-    try? FileManager.default.removeItem(at: plistPath)
-
-    Diagnostics.remark("  Service unloaded and plist removed")
+    do {
+      try FileManager.default.removeItem(at: plistPath)
+      Diagnostics.remark("  Plist removed: \(plistPath.path)")
+    } catch {
+      Diagnostics.warning("  Could not remove plist: \(error.localizedDescription)")
+    }
     Diagnostics.remark("  Note: Binaries left in ~/.swiftpm/bin/ (remove manually if needed)")
   }
 
@@ -293,11 +360,21 @@ struct DaemonPluginConfig: Codable {
   let cacheDirectory: String?
 }
 
+/// Output from atomic-install-tool for JSON parsing
+struct InstallToolOutput: Codable {
+  let success: Bool
+  let installedFiles: [String]
+  let backupsCreated: Int
+  let operationID: String
+  let error: String?
+}
+
 enum PluginError: Error, CustomStringConvertible {
   case configNotFound
   case buildFailed(String)
   case artifactsNotFound
   case scriptFailed
+  case installationFailed(String)
 
   var description: String {
     switch self {
@@ -309,6 +386,8 @@ enum PluginError: Error, CustomStringConvertible {
       return "No build artifacts found"
     case .scriptFailed:
       return "Installation script failed"
+    case .installationFailed(let message):
+      return "Binary installation failed: \(message)"
     }
   }
 }
