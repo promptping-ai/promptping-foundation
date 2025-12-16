@@ -7,7 +7,10 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  ci:
     uses: promptping-ai/.github/.github/workflows/graphite-swift-ci.yml@main
-    secrets:
-      GRAPHITE_CI_TOKEN: ${{ secrets.GRAPHITE_CI_TOKEN }}
+    secrets: inherit
+
+  rules:
+    uses: promptping-ai/.github/.github/workflows/swift-rules-check.yml@main
+    secrets: inherit
