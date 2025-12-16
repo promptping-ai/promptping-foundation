@@ -30,19 +30,44 @@ import Logging
 /// try await manager.bootstrap(plistURL)
 /// ```
 public actor LaunchAgentManager {
+  /// Type alias for subprocess execution - enables testing via closure injection
+  public typealias RunCommand =
+    @Sendable (
+      Executable, [String], String?
+    ) async throws(SubprocessError) -> SubprocessResult
+
   private let subprocessRunner: SubprocessRunner
+  private let runCommand: RunCommand
   private let logger: Logger
   private let fileManager: FileManager
 
   /// Creates a new launch agent manager
+  ///
+  /// - Parameters:
+  ///   - subprocessRunner: The subprocess runner for executing commands
+  ///   - logger: Logger instance for diagnostic output
+  ///   - fileManager: File manager for plist operations
+  ///   - runCommand: Optional closure override for testing subprocess execution
   public init(
     subprocessRunner: SubprocessRunner,
     logger: Logger = Logger(label: "promptping.launchagent"),
-    fileManager: FileManager = .default
+    fileManager: FileManager = .default,
+    runCommand: RunCommand? = nil
   ) {
     self.subprocessRunner = subprocessRunner
     self.logger = logger
     self.fileManager = fileManager
+    if let runCommand {
+      self.runCommand = runCommand
+    } else {
+      // Default: forward to actual SubprocessRunner
+      // Note: Explicit closure typing required for Swift 6 typed throws
+      self.runCommand = {
+        @Sendable (executable: Executable, args: [String], workDir: String?)
+          async throws(SubprocessError) -> SubprocessResult in
+        try await subprocessRunner.run(executable, arguments: args, workingDirectory: workDir)
+      }
+    }
   }
 
   // MARK: - Service Domain
@@ -65,10 +90,10 @@ public actor LaunchAgentManager {
   public func isServiceLoaded(_ label: String) async -> Bool {
     do {
       let target = try serviceTarget(label)
-      let result = try await subprocessRunner.run(.launchctl, arguments: ["print", target])
+      let result = try await runCommand(.launchctl, ["print", target], nil)
       return result.succeeded
     } catch {
-      logger.debug("Failed to check service status: \(error)")
+      logger.warning("Failed to check if service '\(label)' is loaded: \(error)")
       return false
     }
   }
@@ -77,7 +102,7 @@ public actor LaunchAgentManager {
   public func getServiceStatus(_ label: String) async -> ServiceStatus {
     do {
       let target = try serviceTarget(label)
-      let result = try await subprocessRunner.run(.launchctl, arguments: ["print", target])
+      let result = try await runCommand(.launchctl, ["print", target], nil)
 
       guard result.succeeded else {
         return .notLoaded
@@ -97,7 +122,7 @@ public actor LaunchAgentManager {
 
       return .loaded
     } catch {
-      logger.debug("Failed to get service status: \(error)")
+      logger.warning("Failed to get status for service '\(label)': \(error)")
       return .unknown
     }
   }
@@ -105,15 +130,29 @@ public actor LaunchAgentManager {
   // MARK: - Service Lifecycle
 
   /// Bootstraps (loads) a service from a plist file
+  ///
+  /// This method handles the macOS launchctl quirk where `launchctl bootstrap`
+  /// returns exit code 5 ("Input/output error") on service restarts, even though
+  /// the service starts successfully. When error 5 occurs, it falls back to
+  /// using `launchctl kickstart` and verifies the service is actually running.
   public func bootstrap(_ plistPath: URL) async throws(LaunchAgentError) {
     let path = plistPath.path
     guard fileManager.fileExists(atPath: path) else {
       throw .plistNotFound(path: path)
     }
 
-    if let label = extractLabel(from: plistPath), await isServiceLoaded(label) {
+    // Extract label for status checks and kickstart fallback
+    let label = extractLabel(from: plistPath)
+
+    if let label, await isServiceLoaded(label) {
       logger.info("Service \(label) already loaded, unloading first")
-      try? await bootout(label)
+      do {
+        try await bootout(label)
+      } catch {
+        logger.warning(
+          "Failed to unload existing service \(label): \(error). Continuing with bootstrap attempt."
+        )
+      }
       try? await Task.sleep(for: .milliseconds(500))
     }
 
@@ -121,29 +160,80 @@ public actor LaunchAgentManager {
     logger.info("Bootstrapping service from \(path)")
 
     do {
-      let result = try await subprocessRunner.run(
-        .launchctl,
-        arguments: ["bootstrap", domain, path]
-      )
+      let result = try await runCommand(.launchctl, ["bootstrap", domain, path], nil)
 
-      guard result.succeeded else {
-        struct BootstrapCommandError: Error, Sendable {
-          let message: String
-        }
-        throw LaunchAgentError.bootstrapFailed(
-          label: path,
-          underlying: BootstrapCommandError(
-            message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
-          )
-        )
+      if result.succeeded {
+        logger.info("Successfully bootstrapped service from \(path)")
+        return
       }
+
+      // Handle macOS launchctl quirk: error 5 (Input/output error) on restart
+      // The service often starts anyway, so fallback to kickstart and verify
+      if result.exitCode == 5, let label {
+        logger.warning(
+          "Bootstrap returned error 5 (I/O error), attempting kickstart fallback for \(label)"
+        )
+        try await kickstartFallback(label: label, plistPath: path)
+        return
+      }
+
+      // Other non-zero exit codes are real failures
+      struct BootstrapCommandError: Error, Sendable {
+        let message: String
+      }
+      throw LaunchAgentError.bootstrapFailed(
+        label: path,
+        underlying: BootstrapCommandError(
+          message: result.error.isEmpty ? "Exit code \(result.exitCode)" : result.error
+        )
+      )
     } catch let error as LaunchAgentError {
       throw error
     } catch {
       throw .bootstrapFailed(label: path, underlying: error)
     }
+  }
 
-    logger.info("Successfully bootstrapped service from \(path)")
+  /// Fallback mechanism when bootstrap fails with error 5
+  ///
+  /// Uses kickstart to ensure the service is running, then verifies status.
+  /// This handles the macOS launchctl quirk where bootstrap returns error 5
+  /// but the service actually starts.
+  private func kickstartFallback(label: String, plistPath: String) async throws(LaunchAgentError) {
+    // First check if service is already running despite the error
+    let initialStatus = await getServiceStatus(label)
+    if case .running(let pid) = initialStatus {
+      logger.info("Service \(label) is already running (PID: \(pid)) despite bootstrap error")
+      return
+    }
+
+    // Try kickstart to force the service to start
+    logger.info("Service not running, attempting kickstart for \(label)")
+
+    do {
+      try await kickstart(label)
+    } catch {
+      // Kickstart failed - service truly didn't start
+      throw .bootstrapFailed(label: plistPath, underlying: error)
+    }
+
+    // Wait briefly and verify service is running
+    try? await Task.sleep(for: .milliseconds(500))
+
+    let finalStatus = await getServiceStatus(label)
+    guard case .running(let pid) = finalStatus else {
+      struct ServiceNotStartedError: Error, Sendable {
+        let message: String
+      }
+      throw .bootstrapFailed(
+        label: plistPath,
+        underlying: ServiceNotStartedError(
+          message: "Service failed to start after kickstart fallback. Status: \(finalStatus)"
+        )
+      )
+    }
+
+    logger.info("Successfully started service \(label) via kickstart fallback (PID: \(pid))")
   }
 
   /// Bootout (unloads) a service from launchd
@@ -152,10 +242,7 @@ public actor LaunchAgentManager {
     logger.info("Booting out service \(label)")
 
     do {
-      let result = try await subprocessRunner.run(
-        .launchctl,
-        arguments: ["bootout", target]
-      )
+      let result = try await runCommand(.launchctl, ["bootout", target], nil)
 
       // Exit code 3 means "service not found" which is acceptable for bootout
       guard result.succeeded || result.exitCode == 3 else {
@@ -184,10 +271,7 @@ public actor LaunchAgentManager {
     logger.info("Kickstarting service \(label)")
 
     do {
-      let result = try await subprocessRunner.run(
-        .launchctl,
-        arguments: ["kickstart", target]
-      )
+      let result = try await runCommand(.launchctl, ["kickstart", target], nil)
 
       guard result.succeeded else {
         struct KickstartCommandError: Error, Sendable {
@@ -215,7 +299,7 @@ public actor LaunchAgentManager {
     logger.info("Sending \(signal) to service \(label)")
 
     do {
-      let result = try await subprocessRunner.run(
+      let result = try await runCommand(.launchctl, ["kill", signal, target], nil)
         .launchctl,
         arguments: ["kill", signal, target]
       )
@@ -274,13 +358,24 @@ public actor LaunchAgentManager {
   // MARK: - Helpers
 
   private func extractLabel(from plistURL: URL) -> String? {
-    guard let data = try? Data(contentsOf: plistURL),
-      let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
-        as? [String: Any],
-      let label = plist["Label"] as? String
-    else {
+    let path = plistURL.path
+    do {
+      let data = try Data(contentsOf: plistURL)
+      guard
+        let plist = try PropertyListSerialization.propertyList(from: data, format: nil)
+          as? [String: Any]
+      else {
+        logger.warning("Plist at \(path) is not a dictionary")
+        return nil
+      }
+      guard let label = plist["Label"] as? String else {
+        logger.warning("Plist at \(path) has no valid 'Label' key")
+        return nil
+      }
+      return label
+    } catch {
+      logger.warning("Failed to extract label from plist at \(path): \(error)")
       return nil
     }
-    return label
   }
 }

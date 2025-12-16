@@ -111,23 +111,66 @@ struct InstallDaemonPlugin: CommandPlugin {
       withIntermediateDirectories: true
     )
 
-    for artifact in artifacts {
-      let source = artifact.url
-      let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
+    // Atomic binary installation with rollback support
+    let operationID = String(UUID().uuidString.prefix(8))
+    var stagedFiles: [(staged: URL, destination: URL)] = []
+    var backupFiles: [(backup: URL, original: URL)] = []
 
-      // Remove existing
-      try? FileManager.default.removeItem(at: destination)
+    do {
+      // Phase 1: Stage - copy all new files to temporary locations
+      Diagnostics.remark("  Staging binaries...")
+      for artifact in artifacts {
+        let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
+        let stagedURL = destination.appendingPathExtension("new.\(operationID)")
+        try FileManager.default.copyItem(at: artifact.url, to: stagedURL)
+        stagedFiles.append((staged: stagedURL, destination: destination))
+      }
 
-      // Copy new
-      try FileManager.default.copyItem(at: source, to: destination)
+      // Phase 2: Backup - save existing files
+      Diagnostics.remark("  Backing up existing binaries...")
+      for (_, destination) in stagedFiles {
+        if FileManager.default.fileExists(atPath: destination.path) {
+          let backupURL = destination.appendingPathExtension("bak.\(operationID)")
+          try FileManager.default.copyItem(at: destination, to: backupURL)
+          backupFiles.append((backup: backupURL, original: destination))
+        }
+      }
 
-      // Make executable
-      try FileManager.default.setAttributes(
-        [.posixPermissions: 0o755],
-        ofItemAtPath: destination.path
-      )
+      // Phase 3: Swap - move staged files to destinations
+      Diagnostics.remark("  Installing binaries...")
+      for (stagedURL, destination) in stagedFiles {
+        if FileManager.default.fileExists(atPath: destination.path) {
+          try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: stagedURL, to: destination)
+        try FileManager.default.setAttributes(
+          [.posixPermissions: 0o755],
+          ofItemAtPath: destination.path
+        )
+        Diagnostics.remark("    Installed: \(destination.lastPathComponent)")
+      }
 
-      Diagnostics.remark("  Installed: \(artifact.url.lastPathComponent)")
+      // Phase 4: Cleanup - remove backups on success
+      for (backupURL, _) in backupFiles {
+        try? FileManager.default.removeItem(at: backupURL)
+      }
+
+    } catch {
+      // Rollback: restore backups, delete staged files
+      Diagnostics.error("Installation failed: \(error)")
+      Diagnostics.remark("  Rolling back...")
+
+      for (stagedURL, _) in stagedFiles {
+        try? FileManager.default.removeItem(at: stagedURL)
+      }
+
+      for (backupURL, originalURL) in backupFiles {
+        try? FileManager.default.removeItem(at: originalURL)
+        try? FileManager.default.moveItem(at: backupURL, to: originalURL)
+        Diagnostics.remark("    Restored: \(originalURL.lastPathComponent)")
+      }
+
+      throw PluginError.installationFailed(error)
     }
 
     // Generate and install plist (if daemon product specified)
@@ -298,6 +341,7 @@ enum PluginError: Error, CustomStringConvertible {
   case buildFailed(String)
   case artifactsNotFound
   case scriptFailed
+  case installationFailed(Error)
 
   var description: String {
     switch self {
@@ -309,6 +353,8 @@ enum PluginError: Error, CustomStringConvertible {
       return "No build artifacts found"
     case .scriptFailed:
       return "Installation script failed"
+    case .installationFailed(let underlying):
+      return "Binary installation failed: \(underlying.localizedDescription)"
     }
   }
 }
