@@ -111,66 +111,72 @@ struct InstallDaemonPlugin: CommandPlugin {
       withIntermediateDirectories: true
     )
 
-    // Atomic binary installation with rollback support
-    let operationID = String(UUID().uuidString.prefix(8))
-    var stagedFiles: [(staged: URL, destination: URL)] = []
-    var backupFiles: [(backup: URL, original: URL)] = []
+    // Atomic binary installation using atomic-install-tool
+    // (Plugins can't import library targets directly - SE-0303)
+    Diagnostics.remark("  Installing binaries atomically...")
+
+    let tool = try context.tool(named: "atomic-install-tool")
+
+    // Build operations JSON
+    let operations = artifacts.map { artifact -> [String: String] in
+      let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
+      return [
+        "source": artifact.url.path,
+        "destination": destination.path,
+      ]
+    }
+
+    let operationsJSON: String
+    do {
+      let jsonData = try JSONSerialization.data(withJSONObject: operations, options: [])
+      operationsJSON = String(data: jsonData, encoding: .utf8) ?? "[]"
+    } catch {
+      throw PluginError.installationFailed("Failed to encode operations: \(error)")
+    }
+
+    // Run the atomic install tool
+    let process = Process()
+    process.executableURL = tool.url
+    process.arguments = ["install", "--operations", operationsJSON, "--json"]
+
+    let outputPipe = Pipe()
+    let errorPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = errorPipe
 
     do {
-      // Phase 1: Stage - copy all new files to temporary locations
-      Diagnostics.remark("  Staging binaries...")
-      for artifact in artifacts {
-        let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
-        let stagedURL = destination.appendingPathExtension("new.\(operationID)")
-        try FileManager.default.copyItem(at: artifact.url, to: stagedURL)
-        stagedFiles.append((staged: stagedURL, destination: destination))
-      }
-
-      // Phase 2: Backup - save existing files
-      Diagnostics.remark("  Backing up existing binaries...")
-      for (_, destination) in stagedFiles {
-        if FileManager.default.fileExists(atPath: destination.path) {
-          let backupURL = destination.appendingPathExtension("bak.\(operationID)")
-          try FileManager.default.copyItem(at: destination, to: backupURL)
-          backupFiles.append((backup: backupURL, original: destination))
-        }
-      }
-
-      // Phase 3: Swap - move staged files to destinations
-      Diagnostics.remark("  Installing binaries...")
-      for (stagedURL, destination) in stagedFiles {
-        if FileManager.default.fileExists(atPath: destination.path) {
-          try FileManager.default.removeItem(at: destination)
-        }
-        try FileManager.default.moveItem(at: stagedURL, to: destination)
-        try FileManager.default.setAttributes(
-          [.posixPermissions: 0o755],
-          ofItemAtPath: destination.path
-        )
-        Diagnostics.remark("    Installed: \(destination.lastPathComponent)")
-      }
-
-      // Phase 4: Cleanup - remove backups on success
-      for (backupURL, _) in backupFiles {
-        try? FileManager.default.removeItem(at: backupURL)
-      }
-
+      try process.run()
+      process.waitUntilExit()
     } catch {
-      // Rollback: restore backups, delete staged files
-      Diagnostics.error("Installation failed: \(error)")
-      Diagnostics.remark("  Rolling back...")
+      throw PluginError.installationFailed("Failed to run atomic-install-tool: \(error)")
+    }
 
-      for (stagedURL, _) in stagedFiles {
-        try? FileManager.default.removeItem(at: stagedURL)
+    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+
+    if process.terminationStatus != 0 {
+      // Tool failed - parse JSON output for detailed error
+      if let output = String(data: outputData, encoding: .utf8), !output.isEmpty {
+        // The tool outputs the full error message with rollback status
+        Diagnostics.error(output)
       }
-
-      for (backupURL, originalURL) in backupFiles {
-        try? FileManager.default.removeItem(at: originalURL)
-        try? FileManager.default.moveItem(at: backupURL, to: originalURL)
-        Diagnostics.remark("    Restored: \(originalURL.lastPathComponent)")
+      if let errorOutput = String(data: errorData, encoding: .utf8), !errorOutput.isEmpty {
+        Diagnostics.error(errorOutput)
       }
+      throw PluginError.installationFailed("Binary installation failed (see above for details)")
+    }
 
-      throw PluginError.installationFailed(error)
+    // Parse success output
+    if let output = String(data: outputData, encoding: .utf8),
+      let jsonData = output.data(using: .utf8),
+      let result = try? JSONDecoder().decode(InstallToolOutput.self, from: jsonData)
+    {
+      for file in result.installedFiles {
+        Diagnostics.remark("    Installed: \(file)")
+      }
+      if result.backupsCreated > 0 {
+        Diagnostics.remark("    Backups created: \(result.backupsCreated)")
+      }
     }
 
     // Generate and install plist (if daemon product specified)
@@ -336,12 +342,21 @@ struct DaemonPluginConfig: Codable {
   let cacheDirectory: String?
 }
 
+/// Output from atomic-install-tool for JSON parsing
+struct InstallToolOutput: Codable {
+  let success: Bool
+  let installedFiles: [String]
+  let backupsCreated: Int
+  let operationID: String
+  let error: String?
+}
+
 enum PluginError: Error, CustomStringConvertible {
   case configNotFound
   case buildFailed(String)
   case artifactsNotFound
   case scriptFailed
-  case installationFailed(Error)
+  case installationFailed(String)
 
   var description: String {
     switch self {
@@ -353,8 +368,8 @@ enum PluginError: Error, CustomStringConvertible {
       return "No build artifacts found"
     case .scriptFailed:
       return "Installation script failed"
-    case .installationFailed(let underlying):
-      return "Binary installation failed: \(underlying.localizedDescription)"
+    case .installationFailed(let message):
+      return "Binary installation failed: \(message)"
     }
   }
 }
