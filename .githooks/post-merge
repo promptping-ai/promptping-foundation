@@ -1,0 +1,15 @@
+#!/bin/bash
+# Post-merge hook: Re-index code after pulling/merging changes
+
+# Get the project directory (works for both regular repos and submodules)
+PROJECT_DIR="$(git rev-parse --show-toplevel)"
+
+BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+
+if [ -x "$BINARY" ]; then
+  echo "📚 [post-merge] Re-indexing after pull/merge..."
+  ("$BINARY" index "$PROJECT_DIR" > /tmp/code-search-mcp-post-merge.log 2>&1 &)
+else
+  echo "⚠️  code-search-mcp not found at $BINARY"
+  echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
+fi
