@@ -41,7 +41,7 @@ public actor GitHubReleaseManager {
     )
 
     guard result.terminationStatus.isSuccess else {
-      throw GitHubReleaseError.tagCheckFailed(tag: tag, reason: result.standardError)
+      throw GitHubReleaseError.tagCheckFailed(tag: tag, reason: result.errorContext)
     }
 
     return !result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -63,7 +63,7 @@ public actor GitHubReleaseManager {
     let result = try await runGit(arguments: arguments, workingDirectory: directory)
 
     guard result.terminationStatus.isSuccess else {
-      throw GitHubReleaseError.tagCreationFailed(tag: tag, reason: result.standardError)
+      throw GitHubReleaseError.tagCreationFailed(tag: tag, reason: result.errorContext)
     }
   }
 
@@ -76,7 +76,7 @@ public actor GitHubReleaseManager {
     )
 
     guard result.terminationStatus.isSuccess else {
-      throw GitHubReleaseError.pushFailed(tag: tag, reason: result.standardError)
+      throw GitHubReleaseError.pushFailed(tag: tag, reason: result.errorContext)
     }
   }
 
@@ -98,18 +98,20 @@ public actor GitHubReleaseManager {
     let tag = "v\(version)"
     var arguments = ["release", "create", tag]
 
-    // Title
+    // Title (with validation)
     if let title {
-      arguments += ["--title", title]
+      let validatedTitle = try validateInput(title, field: "title")
+      arguments += ["--title", validatedTitle]
     } else {
       arguments += ["--title", "Release \(version)"]
     }
 
-    // Notes
+    // Notes (with validation)
     if let notesFile {
       arguments += ["--notes-file", notesFile.path]
     } else if let notes {
-      arguments += ["--notes", notes]
+      let validatedNotes = try validateInput(notes, field: "notes")
+      arguments += ["--notes", validatedNotes]
     } else if generateNotes {
       arguments.append("--generate-notes")
     } else {
@@ -130,7 +132,7 @@ public actor GitHubReleaseManager {
     let result = try await runGH(arguments: arguments, workingDirectory: directory)
 
     guard result.terminationStatus.isSuccess else {
-      throw GitHubReleaseError.releaseCreationFailed(tag: tag, reason: result.standardError)
+      throw GitHubReleaseError.releaseCreationFailed(tag: tag, reason: result.errorContext)
     }
 
     return result.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -185,7 +187,7 @@ public actor GitHubReleaseManager {
     guard result.terminationStatus.isSuccess else {
       throw GitHubReleaseError.gitOperationFailed(
         operation: "add",
-        reason: result.standardError
+        reason: result.errorContext
       )
     }
   }
@@ -200,7 +202,7 @@ public actor GitHubReleaseManager {
     guard result.terminationStatus.isSuccess else {
       throw GitHubReleaseError.gitOperationFailed(
         operation: "commit",
-        reason: result.standardError
+        reason: result.errorContext
       )
     }
   }
@@ -212,17 +214,40 @@ public actor GitHubReleaseManager {
     guard result.terminationStatus.isSuccess else {
       throw GitHubReleaseError.gitOperationFailed(
         operation: "push",
-        reason: result.standardError
+        reason: result.errorContext
       )
     }
   }
 
   // MARK: - Private Helpers
 
+  /// Validate input to prevent command injection and ensure reasonable limits
+  private func validateInput(
+    _ input: String,
+    field: String,
+    maxLength: Int = 10000
+  ) throws(GitHubReleaseError) -> String {
+    guard input.count <= maxLength else {
+      throw .inputTooLong(field: field, maxLength: maxLength)
+    }
+    guard !input.contains("\0") else {
+      throw .invalidInput(field: field, reason: "contains null bytes")
+    }
+    return input
+  }
+
   private struct ProcessResult {
     let standardOutput: String
     let standardError: String
     let terminationStatus: TerminationStatus
+
+    var errorContext: String {
+      var context = standardError
+      if !standardOutput.isEmpty && standardOutput != standardError {
+        context += "\n[stdout]: \(standardOutput)"
+      }
+      return context.isEmpty ? "(no output)" : context
+    }
   }
 
   private func runGit(arguments: [String], workingDirectory: URL) async throws -> ProcessResult {
@@ -281,6 +306,8 @@ public enum GitHubReleaseError: Error, Sendable, CustomStringConvertible {
   case pushFailed(tag: String, reason: String)
   case releaseCreationFailed(tag: String, reason: String)
   case gitOperationFailed(operation: String, reason: String)
+  case inputTooLong(field: String, maxLength: Int)
+  case invalidInput(field: String, reason: String)
 
   public var description: String {
     switch self {
@@ -300,6 +327,10 @@ public enum GitHubReleaseError: Error, Sendable, CustomStringConvertible {
       return "Failed to create release \(tag): \(reason)"
     case .gitOperationFailed(let operation, let reason):
       return "Git \(operation) failed: \(reason)"
+    case .inputTooLong(let field, let maxLength):
+      return "Input '\(field)' exceeds maximum length of \(maxLength) characters"
+    case .invalidInput(let field, let reason):
+      return "Invalid input for '\(field)': \(reason)"
     }
   }
 }
