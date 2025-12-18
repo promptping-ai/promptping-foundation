@@ -64,7 +64,10 @@ let package = Package(
     .target(
       name: "PRComments",
       dependencies: [
-        .product(name: "Subprocess", package: "swift-subprocess")
+        .product(name: "Subprocess", package: "swift-subprocess"),
+      ],
+      linkerSettings: [
+        .linkedFramework("FoundationModels", .when(platforms: [.macOS]))
       ]
     ),
 
