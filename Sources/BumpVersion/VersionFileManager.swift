@@ -41,14 +41,19 @@ public struct VersionFileManager: Sendable {
     let content = try String(contentsOf: file, encoding: .utf8)
 
     // Parse current version from: public static let current = "X.Y.Z"
-    guard let match = content.range(of: #"current\s*=\s*"([^"]+)""#, options: .regularExpression),
-      let versionMatch = content[match].range(of: #""[^"]+""#, options: .regularExpression)
+    // Pattern requires let/var keyword and word boundary to avoid matching:
+    // - Variables like notCurrentVersion (substring match)
+    // - Commented-out version lines
+    let pattern = #"(?:let|var)\s+current\s*=\s*"([^"]+)""#
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+      let match = regex.firstMatch(
+        in: content, options: [], range: NSRange(content.startIndex..., in: content)),
+      let versionRange = Range(match.range(at: 1), in: content)
     else {
       throw VersionFileError.cannotParseVersion(file.path)
     }
 
-    let versionString = String(content[versionMatch]).trimmingCharacters(
-      in: CharacterSet(charactersIn: "\""))
+    let versionString = String(content[versionRange])
     guard let version = SemanticVersion.parse(versionString) else {
       throw VersionFileError.invalidVersionFormat(versionString)
     }
