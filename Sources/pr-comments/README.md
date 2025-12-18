@@ -101,4 +101,4 @@ The tool automatically detects your provider from:
 
 ## License
 
-Part of the promptping-foundation package.
+Part of the PromptPingFoundation package.
