@@ -9,6 +9,22 @@ let package = Package(
       name: "PromptPingFoundation",
       targets: ["PromptPingFoundation"]
     ),
+    .library(
+      name: "BumpVersion",
+      targets: ["BumpVersion"]
+    ),
+    .executable(
+      name: "bump-version",
+      targets: ["bump-version"]
+    ),
+    .library(
+      name: "PRComments",
+      targets: ["PRComments"]
+    ),
+    .executable(
+      name: "pr-comments",
+      targets: ["pr-comments"]
+    ),
     .plugin(
       name: "InstallDaemon",
       targets: ["InstallDaemonPlugin"]
@@ -47,6 +63,40 @@ let package = Package(
       dependencies: []
     ),
 
+    // Version bumping library (generic, reusable across org)
+    .target(
+      name: "BumpVersion",
+      dependencies: [
+        .product(name: "SemanticVersion", package: "SemanticVersion"),
+        .product(name: "Subprocess", package: "swift-subprocess"),
+      ]
+    ),
+
+    // Generic version bump CLI tool (installable via swift package experimental-install)
+    .executableTarget(
+      name: "bump-version",
+      dependencies: [
+        "BumpVersion",
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
+      ]
+    ),
+
+    // PR comments library (parses and formats GitHub PR comments)
+    .target(
+      name: "PRComments",
+      dependencies: []
+    ),
+
+    // PR comments CLI tool (installable via swift package experimental-install)
+    .executableTarget(
+      name: "pr-comments",
+      dependencies: [
+        "PRComments",
+        .product(name: "Subprocess", package: "swift-subprocess"),
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
+      ]
+    ),
+
     // Executable for plugin to invoke (plugins can't import libraries directly)
     // See SE-0303: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0303-swiftpm-extensible-build-tools.md
     .executableTarget(
@@ -82,6 +132,14 @@ let package = Package(
     .testTarget(
       name: "AtomicInstallTests",
       dependencies: ["AtomicInstall"]
+    ),
+    .testTarget(
+      name: "BumpVersionTests",
+      dependencies: ["BumpVersion"]
+    ),
+    .testTarget(
+      name: "PRCommentsTests",
+      dependencies: ["PRComments"]
     ),
   ]
 )
