@@ -268,10 +268,12 @@ struct BumpVersionCommand: AsyncParsableCommand {
             changelogPath: changelogPath
           )
           if releaseNotes == nil {
-            print("Note: No section found for version \(newVersion) in CHANGELOG.md")
+            print("Warning: No section found for version \(newVersion) in CHANGELOG.md")
+            print("         Using default release notes: 'Release \(newVersion)'")
           }
         } catch {
           print("Warning: Failed to read CHANGELOG.md: \(error.localizedDescription)")
+          print("         Using default release notes: 'Release \(newVersion)'")
         }
       }
 
