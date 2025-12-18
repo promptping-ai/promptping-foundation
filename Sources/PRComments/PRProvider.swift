@@ -52,6 +52,7 @@ public enum PRProviderError: Error, CustomStringConvertible {
   case commandFailed(String, stderr: String)
   case unsupportedOperation(String)
   case invalidResponse(String)
+  case invalidConfiguration(String)
 
   public var description: String {
     switch self {
@@ -63,6 +64,8 @@ public enum PRProviderError: Error, CustomStringConvertible {
       return "Operation '\(operation)' is not supported by this provider"
     case .invalidResponse(let details):
       return "Invalid response from provider: \(details)"
+    case .invalidConfiguration(let details):
+      return "Invalid configuration: \(details)"
     }
   }
 }

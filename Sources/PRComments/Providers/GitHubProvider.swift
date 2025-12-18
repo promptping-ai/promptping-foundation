@@ -38,20 +38,34 @@ public struct GitHubProvider: PRProvider {
   ) async throws {
     let ghPath = try await cli.findExecutable(name: "gh")
 
+    // Validate repo format if provided
+    var owner: String?
+    var repoName: String?
+    if let repo = repo {
+      let parts = repo.split(separator: "/", maxSplits: 1)
+      guard parts.count == 2 else {
+        throw PRProviderError.invalidConfiguration(
+          "Invalid repo format '\(repo)'. Expected 'owner/repo'")
+      }
+      owner = String(parts[0])
+      repoName = String(parts[1])
+    }
+
     // Use gh api to post a comment reply
+    // GitHub API: POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies
     var args = [
       "api",
       "-X", "POST",
-      "repos/{owner}/{repo}/pulls/comments/\(commentId)/replies",
-      "-f", "body=\(body)",
     ]
 
-    if let repo = repo {
-      args.append(contentsOf: [
-        "-F", "owner=\(repo.split(separator: "/")[0])", "-F",
-        "repo=\(repo.split(separator: "/")[1])",
-      ])
+    if let owner = owner, let repoName = repoName {
+      args.append("repos/\(owner)/\(repoName)/pulls/comments/\(commentId)/replies")
+    } else {
+      // Use placeholder syntax when repo not specified (gh will resolve from current repo)
+      args.append("repos/{owner}/{repo}/pulls/comments/\(commentId)/replies")
     }
+
+    args.append(contentsOf: ["-f", "body=\(body)"])
 
     _ = try await cli.execute(executable: ghPath, arguments: args)
   }
