@@ -3,13 +3,32 @@
 
 # Get the project directory (works for both regular repos and submodules)
 PROJECT_DIR="$(git rev-parse --show-toplevel)"
+GIT_DIR="$(git rev-parse --git-dir)"
 
 BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+LOCK_FILE="$GIT_DIR/code-search-mcp.lock"
+LOG_FILE="$GIT_DIR/code-search-mcp.log"
+
+# Check if another index job is running
+if [ -f "$LOCK_FILE" ]; then
+  # Check if the process is still running (stale lock detection)
+  if kill -0 "$(cat "$LOCK_FILE")" 2>/dev/null; then
+    echo "⏳ [post-commit] Index already in progress, skipping..."
+    exit 0
+  else
+    # Stale lock file - remove it
+    rm -f "$LOCK_FILE"
+  fi
+fi
 
 if [ -x "$BINARY" ]; then
   echo "📚 [post-commit] Re-indexing after commit..."
-  ("$BINARY" index "$PROJECT_DIR" > /tmp/code-search-mcp-post-commit.log 2>&1 &)
+  (
+    echo $$ > "$LOCK_FILE"
+    "$BINARY" index "$PROJECT_DIR" >> "$LOG_FILE" 2>&1
+    rm -f "$LOCK_FILE"
+  ) &
 else
   echo "⚠️  code-search-mcp not found at $BINARY"
-  echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
+  echo "    Run: ./scripts/setup-code-search.sh"
 fi
