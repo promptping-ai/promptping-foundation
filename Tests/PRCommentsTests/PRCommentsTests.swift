@@ -220,4 +220,83 @@ struct PRCommentsTests {
     #expect(output.contains("Line 2"))
     #expect(output.contains("Line 3"))
   }
+
+  @Test("Formatter displays comment IDs")
+  func testCommentIDDisplay() {
+    let pr = PullRequest(
+      body: "",
+      comments: [
+        Comment(
+          id: "IC_kwDOKtest_c5aXYZ",
+          author: Author(login: "user"),
+          authorAssociation: "MEMBER",
+          body: "Test comment",
+          createdAt: "2025-12-18T10:00:00Z",
+          url: "https://test.com"
+        )
+      ],
+      reviews: []
+    )
+
+    let formatter = PRCommentsFormatter()
+    let output = formatter.format(pr, includeBody: false)
+
+    #expect(output.contains("ID: IC_kwDOKtest_c5aXYZ"))
+  }
+
+  @Test("Formatter displays thread IDs for reviews")
+  func testThreadIDDisplay() {
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "PRR_kwDOKtest_thread123",
+          author: Author(login: "reviewer"),
+          authorAssociation: "MEMBER",
+          body: "Review comment",
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "COMMENTED"
+        )
+      ]
+    )
+
+    let formatter = PRCommentsFormatter()
+    let output = formatter.format(pr, includeBody: false)
+
+    #expect(output.contains("Thread: PRR_kwDOKtest_thread123"))
+  }
+
+  @Test("Formatter displays review comment IDs")
+  func testReviewCommentIDDisplay() {
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer"),
+          authorAssociation: "MEMBER",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "COMMENTED",
+          comments: [
+            ReviewComment(
+              id: "PRRC_kwDOKtest_inlineABC",
+              path: "Sources/Test.swift",
+              line: 42,
+              body: "Consider refactoring",
+              createdAt: "2025-12-18T10:00:00Z"
+            )
+          ]
+        )
+      ]
+    )
+
+    let formatter = PRCommentsFormatter()
+    let output = formatter.format(pr, includeBody: false)
+
+    #expect(output.contains("ID: PRRC_kwDOKtest_inlineABC"))
+    #expect(output.contains("Sources/Test.swift:42"))
+  }
 }

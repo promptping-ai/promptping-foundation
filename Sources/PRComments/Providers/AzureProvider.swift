@@ -53,13 +53,12 @@ public struct AzureProvider: PRProvider {
   ) async throws {
     let azPath = try await cli.findExecutable(name: "az")
 
-    // Use az repos pr policy to add comment
+    // Azure: commentId is the thread ID, use thread comment create
     var args = [
-      "repos", "pr", "policy", "create",
-      "--id", prIdentifier,
-      "--type", "comment",
-      "--comment", body,
-      "--parent-comment-id", commentId,
+      "repos", "pr", "thread", "comment", "create",
+      "--thread-id", commentId,
+      "--content", body,
+      "--pull-request-id", prIdentifier,
     ]
 
     if let repo = repo {
@@ -76,12 +75,12 @@ public struct AzureProvider: PRProvider {
   ) async throws {
     let azPath = try await cli.findExecutable(name: "az")
 
-    // Azure has thread status management
+    // Azure thread status update - "fixed" marks as resolved
     var args = [
-      "repos", "pr", "update",
-      "--id", prIdentifier,
-      "--status", "completed",
+      "repos", "pr", "thread", "update",
       "--thread-id", threadId,
+      "--status", "fixed",
+      "--pull-request-id", prIdentifier,
     ]
 
     if let repo = repo {
