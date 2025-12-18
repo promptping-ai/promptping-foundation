@@ -47,7 +47,10 @@ public struct GitHubProvider: PRProvider {
     ]
 
     if let repo = repo {
-      args.append(contentsOf: ["-F", "owner=\(repo.split(separator: "/")[0])", "-F", "repo=\(repo.split(separator: "/")[1])"])
+      args.append(contentsOf: [
+        "-F", "owner=\(repo.split(separator: "/")[0])", "-F",
+        "repo=\(repo.split(separator: "/")[1])",
+      ])
     }
 
     _ = try await cli.execute(executable: ghPath, arguments: args)

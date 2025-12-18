@@ -11,25 +11,38 @@ public struct AzureProvider: PRProvider {
   public func fetchPR(identifier: String, repo: String?) async throws -> PullRequest {
     let azPath = try await cli.findExecutable(name: "az")
 
-    // Build az command
-    var args: [String] = ["repos", "pr", "show"]
+    // Fetch basic PR info
+    var prArgs: [String] = ["repos", "pr", "show"]
     if !identifier.isEmpty {
-      args.append(contentsOf: ["--id", identifier])
+      prArgs.append(contentsOf: ["--id", identifier])
     }
-    args.append(contentsOf: ["--output", "json"])
+    prArgs.append(contentsOf: ["--output", "json"])
 
     if let repo = repo {
-      args.append(contentsOf: ["--repository", repo])
+      prArgs.append(contentsOf: ["--repository", repo])
     }
 
-    // Execute command
-    let output = try await cli.execute(executable: azPath, arguments: args)
+    let prOutput = try await cli.execute(executable: azPath, arguments: prArgs)
 
-    // Parse Azure JSON and convert to our PullRequest format
+    // Fetch PR threads
+    var threadsArgs: [String] = ["repos", "pr", "list-threads"]
+    if !identifier.isEmpty {
+      threadsArgs.append(contentsOf: ["--id", identifier])
+    }
+    threadsArgs.append(contentsOf: ["--output", "json"])
+
+    if let repo = repo {
+      threadsArgs.append(contentsOf: ["--repository", repo])
+    }
+
+    let threadsOutput = try await cli.execute(executable: azPath, arguments: threadsArgs)
+
+    // Parse Azure JSON
     let decoder = JSONDecoder()
-    let azurePR = try decoder.decode(AzurePR.self, from: Data(output))
+    let azurePR = try decoder.decode(AzurePR.self, from: Data(prOutput))
+    let azureThreads = try decoder.decode([AzurePRThread].self, from: Data(threadsOutput))
 
-    return azurePR.toPullRequest()
+    return azurePR.toPullRequest(threads: azureThreads)
   }
 
   public func replyToComment(
@@ -90,7 +103,6 @@ private struct AzurePR: Codable {
   let title: String
   let description: String?
   let pullRequestId: Int
-  // Note: Full comment/thread parsing would require additional API calls
 
   enum CodingKeys: String, CodingKey {
     case title
@@ -98,14 +110,113 @@ private struct AzurePR: Codable {
     case pullRequestId
   }
 
-  func toPullRequest() -> PullRequest {
-    // For now, return basic structure
-    // Full implementation would require fetching threads via API
+  func toPullRequest(threads: [AzurePRThread]) -> PullRequest {
+    // Convert Azure threads to our Review model
+    let reviews = threads.map { thread in
+      Review(
+        id: String(thread.id),
+        author: Author(login: thread.comments.first?.author.displayName ?? "Unknown"),
+        authorAssociation: "CONTRIBUTOR",
+        body: thread.comments.first?.content,
+        submittedAt: thread.publishedDate?.id,
+        state: thread.status == "active" ? "PENDING" : "APPROVED",
+        comments: thread.threadContext != nil ? convertToReviewComments(thread: thread) : nil
+      )
+    }
+
+    // Azure doesn't have separate top-level comments like GitHub
+    // All comments are within threads
     return PullRequest(
       body: description ?? "",
       comments: [],
-      reviews: [],
+      reviews: reviews,
       files: nil
     )
+  }
+
+  private func convertToReviewComments(thread: AzurePRThread) -> [ReviewComment] {
+    guard let context = thread.threadContext else { return [] }
+
+    return thread.comments.map { comment in
+      ReviewComment(
+        id: String(comment.id),
+        path: context.filePath ?? "",
+        line: context.rightFileStart?.line,
+        body: comment.content ?? "",
+        createdAt: comment.publishedDate?.id ?? ""
+      )
+    }
+  }
+}
+
+/// Azure PR Thread structure
+private struct AzurePRThread: Codable {
+  let id: Int
+  let status: String  // "active", "closed", "fixed", etc.
+  let comments: [AzurePRComment]
+  let threadContext: AzureThreadContext?
+  let publishedDate: AzureDateValue?
+
+  enum CodingKeys: String, CodingKey {
+    case id
+    case status
+    case comments
+    case threadContext
+    case publishedDate
+  }
+}
+
+/// Azure PR Comment structure
+private struct AzurePRComment: Codable {
+  let id: Int
+  let author: AzureAuthor
+  let content: String?
+  let publishedDate: AzureDateValue?
+
+  enum CodingKeys: String, CodingKey {
+    case id
+    case author
+    case content
+    case publishedDate
+  }
+}
+
+/// Azure Thread Context (file location info)
+private struct AzureThreadContext: Codable {
+  let filePath: String?
+  let rightFileStart: AzureLinePosition?
+
+  enum CodingKeys: String, CodingKey {
+    case filePath
+    case rightFileStart
+  }
+}
+
+/// Azure Line Position
+private struct AzureLinePosition: Codable {
+  let line: Int
+  let offset: Int
+
+  enum CodingKeys: String, CodingKey {
+    case line
+    case offset
+  }
+}
+
+/// Azure Author structure
+private struct AzureAuthor: Codable {
+  let displayName: String
+
+  enum CodingKeys: String, CodingKey {
+    case displayName
+  }
+}
+
+/// Azure Date Value (Azure returns dates as objects with string value)
+private struct AzureDateValue: Codable {
+  let id: String
+
+  enum CodingKeys: String, CodingKey {
+    case id
   }
 }
