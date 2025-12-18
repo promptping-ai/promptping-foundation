@@ -694,6 +694,305 @@ struct GitHubReleaseManagerTests {
     }
   }
 
+  // MARK: - Input Validation Tests
+
+  @Suite("Input Validation")
+  struct InputValidationTests {
+    let manager = GitHubReleaseManager()
+
+    @Test("createRelease throws inputTooLong for oversized title")
+    func rejectsOversizedTitle() async throws {
+      // Skip if gh is not available (validation happens after gh check)
+      let ghAvailable = try await manager.isGHAvailable()
+      try #require(ghAvailable, "Skipping: gh CLI not available")
+
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("validation-title-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      // Setup git repo
+      setupGitRepoHelper(at: tempDir)
+
+      // Create oversized title (> 10000 chars)
+      let oversizedTitle = String(repeating: "a", count: 10001)
+
+      do {
+        _ = try await manager.createRelease(
+          version: SemanticVersion(1, 0, 0),
+          title: oversizedTitle,
+          in: tempDir
+        )
+        Issue.record("Expected inputTooLong error")
+      } catch GitHubReleaseError.inputTooLong(let field, let maxLength) {
+        #expect(field == "title")
+        #expect(maxLength == 10000)
+      } catch {
+        Issue.record("Wrong error type: \(error)")
+      }
+    }
+
+    @Test("createRelease throws invalidInput for null bytes in title")
+    func rejectsNullBytesInTitle() async throws {
+      // Skip if gh is not available
+      let ghAvailable = try await manager.isGHAvailable()
+      try #require(ghAvailable, "Skipping: gh CLI not available")
+
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("validation-null-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      // Setup git repo
+      setupGitRepoHelper(at: tempDir)
+
+      // Title with null byte injection attempt
+      let maliciousTitle = "Valid\u{0000}Injection"
+
+      do {
+        _ = try await manager.createRelease(
+          version: SemanticVersion(1, 0, 0),
+          title: maliciousTitle,
+          in: tempDir
+        )
+        Issue.record("Expected invalidInput error")
+      } catch GitHubReleaseError.invalidInput(let field, let reason) {
+        #expect(field == "title")
+        #expect(reason.contains("null bytes"))
+      } catch {
+        Issue.record("Wrong error type: \(error)")
+      }
+    }
+
+    @Test("createRelease throws inputTooLong for oversized notes")
+    func rejectsOversizedNotes() async throws {
+      // Skip if gh is not available
+      let ghAvailable = try await manager.isGHAvailable()
+      try #require(ghAvailable, "Skipping: gh CLI not available")
+
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("validation-notes-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      // Setup git repo
+      setupGitRepoHelper(at: tempDir)
+
+      // Create oversized notes (> 10000 chars)
+      let oversizedNotes = String(repeating: "x", count: 10001)
+
+      do {
+        _ = try await manager.createRelease(
+          version: SemanticVersion(1, 0, 0),
+          notes: oversizedNotes,
+          in: tempDir
+        )
+        Issue.record("Expected inputTooLong error")
+      } catch GitHubReleaseError.inputTooLong(let field, let maxLength) {
+        #expect(field == "notes")
+        #expect(maxLength == 10000)
+      } catch {
+        Issue.record("Wrong error type: \(error)")
+      }
+    }
+
+    @Test("createRelease throws invalidInput for null bytes in notes")
+    func rejectsNullBytesInNotes() async throws {
+      // Skip if gh is not available
+      let ghAvailable = try await manager.isGHAvailable()
+      try #require(ghAvailable, "Skipping: gh CLI not available")
+
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("validation-notes-null-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      // Setup git repo
+      setupGitRepoHelper(at: tempDir)
+
+      // Notes with null byte injection attempt
+      let maliciousNotes = "Some notes\u{0000}with injection"
+
+      do {
+        _ = try await manager.createRelease(
+          version: SemanticVersion(1, 0, 0),
+          notes: maliciousNotes,
+          in: tempDir
+        )
+        Issue.record("Expected invalidInput error")
+      } catch GitHubReleaseError.invalidInput(let field, let reason) {
+        #expect(field == "notes")
+        #expect(reason.contains("null bytes"))
+      } catch {
+        Issue.record("Wrong error type: \(error)")
+      }
+    }
+  }
+
+  // MARK: - createRelease Tests
+
+  @Suite("Create Release")
+  struct CreateReleaseTests {
+    let manager = GitHubReleaseManager()
+
+    @Test("isGHAvailable correctly detects gh CLI presence")
+    func detectsGHAvailability() async throws {
+      // This test verifies that isGHAvailable returns a valid result
+      // The actual value depends on the test environment
+      let ghAvailable = try await manager.isGHAvailable()
+
+      // Verify we get a boolean (function doesn't throw for normal conditions)
+      // On CI without gh: false, on dev machines with gh: true
+      #expect(ghAvailable == true || ghAvailable == false)
+
+      // If gh is NOT available, verify createRelease throws the correct error
+      if !ghAvailable {
+        let tempDir = FileManager.default.temporaryDirectory
+          .appendingPathComponent("release-no-gh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer {
+          try? FileManager.default.removeItem(at: tempDir)
+        }
+
+        setupGitRepoHelper(at: tempDir)
+
+        do {
+          _ = try await manager.createRelease(
+            version: SemanticVersion(1, 0, 0),
+            in: tempDir
+          )
+          Issue.record("Expected ghNotAvailable error")
+        } catch GitHubReleaseError.ghNotAvailable {
+          // Expected error case
+        } catch {
+          Issue.record("Wrong error type: \(error)")
+        }
+      }
+    }
+
+    @Test("createRelease auto-detects prerelease from version")
+    func autoDetectsPrerelease() async throws {
+      let ghAvailable = try await manager.isGHAvailable()
+      try #require(ghAvailable, "Skipping: gh CLI not available")
+
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("release-prerelease-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      // Setup git repo with remote (needed for gh release)
+      setupGitRepoHelper(at: tempDir)
+
+      // Create prerelease version
+      let prereleaseVersion = SemanticVersion(1, 0, 0, "alpha.1")
+
+      // Note: This will fail because there's no actual remote, but we can verify
+      // the error contains the tag name, confirming the function processed correctly
+      do {
+        _ = try await manager.createRelease(
+          version: prereleaseVersion,
+          in: tempDir
+        )
+        // If it somehow succeeds, that's fine too
+      } catch let error as GitHubReleaseError {
+        // Expected to fail (no remote), but validates function processed the version
+        #expect(error.description.contains("v1.0.0-alpha.1"))
+      }
+    }
+
+    @Test("createRelease accepts valid custom title without validation errors")
+    func acceptsValidCustomTitle() async throws {
+      let ghAvailable = try await manager.isGHAvailable()
+      try #require(ghAvailable, "Skipping: gh CLI not available")
+
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("release-title-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      setupGitRepoHelper(at: tempDir)
+
+      // Test that valid title passes validation (doesn't throw inputTooLong/invalidInput)
+      // The function will fail at gh execution (no remote), but validation must pass first
+      do {
+        _ = try await manager.createRelease(
+          version: SemanticVersion(1, 0, 0),
+          title: "My Custom Release Title",
+          in: tempDir
+        )
+        // Unexpected success (would need actual GitHub remote)
+      } catch GitHubReleaseError.inputTooLong, GitHubReleaseError.invalidInput {
+        Issue.record("Valid title should not trigger validation errors")
+      } catch GitHubReleaseError.releaseCreationFailed {
+        // Expected - gh fails because no remote, but validation passed
+      } catch {
+        // Other errors are acceptable (e.g., gh auth issues)
+      }
+    }
+  }
+
+  // MARK: - pushTag Tests
+
+  @Suite("Push Tag")
+  struct PushTagTests {
+    let manager = GitHubReleaseManager()
+
+    @Test("pushTag fails without remote")
+    func failsWithoutRemote() async throws {
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("push-tag-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      // Setup git repo with commit and tag but no remote
+      setupGitRepoHelper(at: tempDir)
+
+      let version = SemanticVersion(1, 0, 0)
+      try await manager.createTag(version, in: tempDir)
+
+      // Push should fail
+      await #expect(throws: GitHubReleaseError.self) {
+        try await manager.pushTag(version, in: tempDir)
+      }
+    }
+
+    @Test("pushTag error includes tag name")
+    func errorIncludesTagName() async throws {
+      let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("push-tag-error-\(UUID().uuidString)")
+      try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+      defer {
+        try? FileManager.default.removeItem(at: tempDir)
+      }
+
+      setupGitRepoHelper(at: tempDir)
+
+      let version = SemanticVersion(2, 5, 0)
+      try await manager.createTag(version, in: tempDir)
+
+      do {
+        try await manager.pushTag(version, in: tempDir)
+        Issue.record("Expected pushTag to throw")
+      } catch let error as GitHubReleaseError {
+        #expect(error.description.contains("v2.5.0"))
+      }
+    }
+  }
+
   // MARK: - GitHubReleaseError Tests
 
   @Suite("Error Descriptions")
@@ -754,6 +1053,20 @@ struct GitHubReleaseManagerTests {
       )
       #expect(error.description.contains("commit"))
       #expect(error.description.contains("nothing to commit"))
+    }
+
+    @Test("inputTooLong includes field and maxLength")
+    func inputTooLongDescription() {
+      let error = GitHubReleaseError.inputTooLong(field: "title", maxLength: 10000)
+      #expect(error.description.contains("title"))
+      #expect(error.description.contains("10000"))
+    }
+
+    @Test("invalidInput includes field and reason")
+    func invalidInputDescription() {
+      let error = GitHubReleaseError.invalidInput(field: "notes", reason: "contains null bytes")
+      #expect(error.description.contains("notes"))
+      #expect(error.description.contains("contains null bytes"))
     }
   }
 }

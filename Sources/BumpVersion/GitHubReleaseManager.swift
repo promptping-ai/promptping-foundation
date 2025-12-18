@@ -222,6 +222,17 @@ public actor GitHubReleaseManager {
   // MARK: - Private Helpers
 
   /// Validate input to prevent command injection and ensure reasonable limits
+  ///
+  /// Security validations performed:
+  /// - **Length limit**: Prevents denial of service via extremely long inputs
+  /// - **Null byte check**: Prevents command injection via null byte truncation
+  ///
+  /// - Parameters:
+  ///   - input: The string to validate
+  ///   - field: Field name for error messages (e.g., "title", "notes")
+  ///   - maxLength: Maximum allowed length (default: 10,000 chars ≈ 200 lines of text)
+  /// - Returns: The validated input string
+  /// - Throws: `GitHubReleaseError.inputTooLong` or `GitHubReleaseError.invalidInput`
   private func validateInput(
     _ input: String,
     field: String,
@@ -241,9 +252,15 @@ public actor GitHubReleaseManager {
     let standardError: String
     let terminationStatus: TerminationStatus
 
+    /// Combined error context from stderr and stdout for better diagnostics
+    /// Avoids duplication when stderr already contains stdout content
     var errorContext: String {
       var context = standardError
-      if !standardOutput.isEmpty && standardOutput != standardError {
+      // Only append stdout if it has different content not already in stderr
+      if !standardOutput.isEmpty
+        && standardOutput != standardError
+        && !standardError.contains(standardOutput)
+      {
         context += "\n[stdout]: \(standardOutput)"
       }
       return context.isEmpty ? "(no output)" : context

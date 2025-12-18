@@ -125,6 +125,31 @@ struct SemanticVersionTests {
       #expect(released.isStable == true)
       #expect(released.description == "1.0.0")
     }
+
+    @Test("isPreRelease returns false for stable version")
+    func isPreReleaseReturnsFalseForStable() {
+      let stable = SemanticVersion(1, 0, 0)
+      #expect(stable.isPreRelease == false)
+      #expect(stable.isStable == true)
+    }
+
+    @Test("isPreRelease returns true for all prerelease types")
+    func isPreReleaseReturnsTrueForAllTypes() {
+      let alpha = SemanticVersion(1, 0, 0, "alpha.1")
+      let beta = SemanticVersion(1, 0, 0, "beta.1")
+      let rc = SemanticVersion(1, 0, 0, "rc.1")
+
+      #expect(alpha.isPreRelease == true)
+      #expect(beta.isPreRelease == true)
+      #expect(rc.isPreRelease == true)
+    }
+
+    @Test("PrereleaseType displayName returns human-readable names")
+    func prereleaseDisplayNames() {
+      #expect(PrereleaseType.alpha.displayName == "Alpha")
+      #expect(PrereleaseType.beta.displayName == "Beta")
+      #expect(PrereleaseType.rc.displayName == "Release Candidate")
+    }
   }
 
   @Suite("Description")
