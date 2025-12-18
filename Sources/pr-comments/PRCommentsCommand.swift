@@ -17,7 +17,7 @@ struct PRCommentsCommand: AsyncParsableCommand {
     discussion: """
       View, reply to, and resolve GitHub PR comments, including inline code review comments.
       Uses the `gh` CLI to fetch and update PR data.
-      
+
       Examples:
         pr-comments 29                         # View comments for PR #29
         pr-comments 29 --with-body             # Include PR description
@@ -36,22 +36,22 @@ struct View: AsyncParsableCommand {
     commandName: "view",
     abstract: "View PR comments in a readable format"
   )
-  
+
   @Argument(help: "PR number or URL")
   var prNumber: String?
-  
+
   @Flag(name: .long, help: "Use PR from current branch")
   var current: Bool = false
-  
+
   @Flag(name: .long, help: "Include PR body/description")
   var withBody: Bool = false
-  
+
   @Option(name: .shortAndLong, help: "Repository (owner/repo)")
   var repo: String?
-  
+
   @Option(name: .long, help: "Provider to use (github, gitlab, azure)")
   var provider: String?
-  
+
   func run() async throws {
     // Determine PR identifier
     let prIdentifier: String
@@ -74,7 +74,7 @@ struct View: AsyncParsableCommand {
     } else {
       providerType = nil
     }
-    
+
     let prProvider = try await factory.createProvider(manualType: providerType)
     print("Using \(prProvider.name) provider")
 
@@ -87,4 +87,3 @@ struct View: AsyncParsableCommand {
     print(output)
   }
 }
-
