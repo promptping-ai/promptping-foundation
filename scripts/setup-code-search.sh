@@ -57,8 +57,8 @@ if [ -x "$BINARY" ]; then
 else
   echo "⚠️  code-search-mcp not found at $BINARY"
   echo "   To install:"
-  echo "     cd ~/Developer/code-search-mcp"
-  echo "     swift package experimental-install"
+  echo "     1. Clone: git clone https://github.com/promptping-ai/code-search-mcp.git"
+  echo "     2. Install: cd code-search-mcp && swift package experimental-install"
 fi
 
 echo ""
