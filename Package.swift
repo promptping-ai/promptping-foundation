@@ -89,7 +89,9 @@ let package = Package(
     // PR comments library (parses and formats GitHub PR comments)
     .target(
       name: "PRComments",
-      dependencies: []
+      dependencies: [
+        .product(name: "Subprocess", package: "swift-subprocess"),
+      ]
     ),
 
     // PR comments CLI tool (installable via swift package experimental-install)

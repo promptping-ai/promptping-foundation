@@ -6,8 +6,9 @@ A command-line tool for viewing GitHub PR comments in a readable format.
 
 - 📝 View all PR comments including inline code review comments
 - 🎨 Clean, emoji-based formatting for easy scanning
-- ⚡ Fast and lightweight using the GitHub CLI
+- ⚡ Multi-provider support: GitHub, GitLab, and Azure DevOps
 - 🔍 Supports current branch PR or specific PR numbers
+- 🤖 Auto-detects provider from git remote URL
 
 ## Installation
 
@@ -41,6 +42,14 @@ pr-comments 29 --with-body
 
 ```bash
 pr-comments 42 --repo owner/repo
+```
+
+### Specify provider manually
+
+```bash
+pr-comments 29 --provider github    # Use GitHub
+pr-comments 29 --provider gitlab    # Use GitLab
+pr-comments 29 --provider azure     # Use Azure DevOps
 ```
 
 ## Output Format
@@ -77,8 +86,18 @@ Review states are indicated with emojis:
 
 ## Requirements
 
-- GitHub CLI (`gh`) must be installed and configured
 - Swift 6.1 or later
+- At least one of the following CLIs installed and configured:
+  - GitHub: `gh` CLI (https://cli.github.com/)
+  - GitLab: `glab` CLI (https://gitlab.com/gitlab-org/cli)
+  - Azure DevOps: `az` CLI (https://learn.microsoft.com/en-us/cli/azure/)
+
+## Provider Detection
+
+The tool automatically detects your provider from:
+1. Manual `--provider` flag
+2. Git remote URL (github.com, gitlab.com, dev.azure.com)
+3. First available CLI tool (gh, glab, az)
 
 ## License
 
