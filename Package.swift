@@ -1,9 +1,9 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
   name: "promptping-foundation",
-  platforms: [.macOS(.v15)],
+  platforms: [.macOS(.v26)],
   products: [
     .library(
       name: "PromptPingFoundation",
@@ -38,6 +38,11 @@ let package = Package(
       url: "https://github.com/apple/swift-argument-parser.git",
       from: "1.3.0"
     ),
+    // Markdown parsing for translation preservation
+    .package(
+      url: "https://github.com/swiftlang/swift-markdown.git",
+      from: "0.5.0"
+    ),
   ],
   targets: [
     // Main library
@@ -59,10 +64,13 @@ let package = Package(
     .target(
       name: "PRComments",
       dependencies: [
-        .product(name: "Subprocess", package: "swift-subprocess")
+        .product(name: "Subprocess", package: "swift-subprocess"),
+        .product(name: "Markdown", package: "swift-markdown"),
       ],
       linkerSettings: [
-        .linkedFramework("FoundationModels", .when(platforms: [.macOS]))
+        // Translation.framework for neural machine translation (iOS 17.4+ / macOS 14.4+)
+        // NOT FoundationModels - Translation has no context limits and is purpose-built
+        .linkedFramework("Translation", .when(platforms: [.macOS, .iOS]))
       ]
     ),
 

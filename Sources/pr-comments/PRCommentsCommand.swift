@@ -38,7 +38,7 @@ struct PRCommentsCommand: AsyncParsableCommand {
         pr-comments reply 29 --message "Done!"      # Reply to PR
         pr-comments reply 29 -m "Bien!" --translate-to en  # Reply in English
       """,
-    subcommands: [View.self, Reply.self],
+    subcommands: [View.self, Reply.self, ReplyTo.self, Resolve.self],
     defaultSubcommand: View.self
   )
 }
@@ -66,7 +66,7 @@ struct View: AsyncParsableCommand {
   @Option(name: .long, help: "Provider to use (github, gitlab, azure)")
   var provider: String?
 
-  @Option(name: .shortAndLong, help: "Display language (en, fr) - translates comments")
+  @Option(name: .shortAndLong, help: "Display language (en, fr, nl, de, es, it, ja, ko, pt, ru, zh, ar, hi, id, pl, th, tr, uk, vi) - translates comments")
   var language: String?
 
   @Option(name: .long, help: "Output format: plain, markdown, json")
@@ -112,10 +112,27 @@ struct View: AsyncParsableCommand {
 
       let translator = TranslationService()
       if await translator.isAvailable {
-        pr = try await translatePR(pr, to: targetLanguage, using: translator)
+        do {
+          pr = try await translatePR(pr, to: targetLanguage, using: translator)
+        } catch let error as TranslationError {
+          // Graceful fallback with helpful message
+          let message: String
+          switch error {
+          case .downloadRequired:
+            message =
+              "⚠️  Translation language not downloaded. Open System Settings → General → Language & Region → Translation Languages\n"
+          case .languageNotSupported(let pair):
+            message = "⚠️  Translation not supported for \(pair) - showing original text\n"
+          case .translationFailed(let reason):
+            message = "⚠️  Translation failed: \(reason) - showing original text\n"
+          case .translationUnavailable:
+            message = "⚠️  Translation unavailable - showing original text\n"
+          }
+          FileHandle.standardError.write(message.data(using: .utf8)!)
+        }
       } else {
         FileHandle.standardError.write(
-          "⚠️  Foundation Models not available - showing original text\n".data(using: .utf8)!)
+          "⚠️  Translation.framework not available - showing original text\n".data(using: .utf8)!)
       }
     }
 
@@ -362,7 +379,7 @@ struct Reply: AsyncParsableCommand {
       while let line = readLine() {
         inputLines.append(line)
       }
-      replyMessage = inputLines.joined(separator: "\n")
+      replyMessage = inputLines.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
     }
 
     guard !replyMessage.isEmpty else {
@@ -467,11 +484,11 @@ struct Reply: AsyncParsableCommand {
       }
 
     case "Azure":
-      // az repos pr thread create --pr-id <id> --body "..."
+      // az repos pr thread create --id <id> --content "..."
       var args = [
         "repos", "pr", "thread", "create",
-        "--pr-id", prNumber,
-        "--body", message,
+        "--id", prNumber,
+        "--content", message,
       ]
       if let r = repo {
         args.append(contentsOf: ["--repository", r])
@@ -490,4 +507,167 @@ struct Reply: AsyncParsableCommand {
       throw ValidationError("Reply not supported for provider: \(provider.name)")
     }
   }
+}
+
+// MARK: - ReplyTo Subcommand
+
+struct ReplyTo: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "reply-to",
+    abstract: "Reply to a specific comment or thread"
+  )
+
+  @Argument(help: "PR number")
+  var prNumber: String
+
+  @Argument(help: "Comment/Thread ID (shown in view output as 'ID:' or 'Thread:')")
+  var commentId: String
+
+  @Option(name: .shortAndLong, help: "Reply message")
+  var message: String?
+
+  @Option(name: .long, help: "Translate message to language before sending")
+  var translateTo: String?
+
+  @Flag(name: .long, help: "Preview translation without sending")
+  var preview: Bool = false
+
+  @Option(name: .shortAndLong, help: "Repository (owner/repo)")
+  var repo: String?
+
+  @Option(name: .long, help: "Provider to use (github, gitlab, azure)")
+  var provider: String?
+
+  func run() async throws {
+    // Validate comment ID
+    guard !commentId.trimmingCharacters(in: .whitespaces).isEmpty else {
+      throw ValidationError("Comment ID cannot be empty")
+    }
+
+    // Get message from argument or stdin
+    let replyMessage: String
+    if let msg = message {
+      replyMessage = msg
+    } else {
+      FileHandle.standardError.write(
+        "Enter your reply (Ctrl+D when done):\n".data(using: .utf8)!)
+      var inputLines: [String] = []
+      while let line = readLine() {
+        inputLines.append(line)
+      }
+      replyMessage = inputLines.joined(separator: "\n").trimmingCharacters(in: .whitespaces)
+    }
+
+    guard !replyMessage.isEmpty else {
+      throw ValidationError("Message cannot be empty")
+    }
+
+    // Translate if requested
+    var finalMessage = replyMessage
+    var translationIndicator = ""
+
+    if let lang = translateTo {
+      let targetLanguage = try parseLanguage(lang)
+
+      let translator = TranslationService()
+      guard await translator.isAvailable else {
+        throw ValidationError("Translation unavailable on this system")
+      }
+
+      let result = try await translator.translate(replyMessage, to: targetLanguage)
+      finalMessage = result.translatedText
+      translationIndicator =
+        "[\(result.sourceLanguage.rawValue.uppercased())→\(result.targetLanguage.rawValue.uppercased())]"
+
+      if preview {
+        print("─── Original ───")
+        print(replyMessage)
+        print("")
+        print("─── Translated \(translationIndicator) ───")
+        print(finalMessage)
+        return
+      }
+    } else if preview {
+      print("─── Preview ───")
+      print(finalMessage)
+      return
+    }
+
+    // Send reply to specific comment
+    let factory = ProviderFactory()
+    let providerType = try parseProviderType(provider)
+    let prProvider = try await factory.createProvider(manualType: providerType)
+
+    try await prProvider.replyToComment(
+      prIdentifier: prNumber,
+      commentId: commentId,
+      body: finalMessage,
+      repo: repo
+    )
+
+    if !translationIndicator.isEmpty {
+      print("✅ Reply sent to comment \(commentId) \(translationIndicator)")
+    } else {
+      print("✅ Reply sent to comment \(commentId)")
+    }
+  }
+}
+
+// MARK: - Resolve Subcommand
+
+struct Resolve: AsyncParsableCommand {
+  static let configuration = CommandConfiguration(
+    commandName: "resolve",
+    abstract: "Resolve a discussion thread"
+  )
+
+  @Argument(help: "PR number")
+  var prNumber: String
+
+  @Argument(help: "Thread ID (shown in view output as 'Thread:')")
+  var threadId: String
+
+  @Option(name: .shortAndLong, help: "Repository (owner/repo)")
+  var repo: String?
+
+  @Option(name: .long, help: "Provider to use (github, gitlab, azure)")
+  var provider: String?
+
+  func run() async throws {
+    // Validate thread ID
+    guard !threadId.trimmingCharacters(in: .whitespaces).isEmpty else {
+      throw ValidationError("Thread ID cannot be empty")
+    }
+
+    let factory = ProviderFactory()
+    let providerType = try parseProviderType(provider)
+    let prProvider = try await factory.createProvider(manualType: providerType)
+
+    try await prProvider.resolveThread(
+      prIdentifier: prNumber,
+      threadId: threadId,
+      repo: repo
+    )
+
+    print("✅ Thread \(threadId) resolved")
+  }
+}
+
+// MARK: - Helper Functions
+
+private func parseLanguage(_ code: String) throws -> Language {
+  guard let lang = Language(rawValue: code.lowercased()), lang != .auto else {
+    let validLanguages = Language.allCases.filter { $0 != .auto }.map(\.rawValue).joined(
+      separator: ", ")
+    throw ValidationError("Invalid language '\(code)'. Valid: \(validLanguages)")
+  }
+  return lang
+}
+
+private func parseProviderType(_ str: String?) throws -> ProviderType? {
+  guard let str = str else { return nil }
+  guard let type = ProviderType(rawValue: str.lowercased()) else {
+    throw ValidationError("Invalid provider '\(str)'. Use: github, gitlab, or azure")
+  }
+  return type
 }

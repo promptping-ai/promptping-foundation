@@ -1,159 +1,265 @@
 import Foundation
 
-#if canImport(FoundationModels)
-  import FoundationModels
+#if canImport(Translation)
+  import Translation
 #endif
 
 public enum TranslationError: Error, Sendable {
-  case foundationModelsUnavailable
+  case translationUnavailable
   case translationFailed(String)
-  case invalidLanguagePair
+  case languageNotSupported(String)
+  case downloadRequired
 }
 
-/// Actor for local translation using Apple Foundation Models
+/// Actor for local translation using Apple's Translation framework
 ///
-/// Uses Apple's on-device Foundation Models framework (macOS 26+) for privacy-first,
-/// offline translation between French and English.
+/// Uses Apple's dedicated neural machine translation API (macOS 26+)
+/// for efficient, offline translation between supported languages.
+///
+/// NOTE: This uses Translation.framework, NOT FoundationModels.
+/// Translation has no context window limits and is purpose-built for this task.
 ///
 /// References:
-/// - https://developer.apple.com/documentation/foundationmodels
-/// - https://www.createwithswift.com/exploring-the-foundation-models-framework/
+/// - https://developer.apple.com/documentation/translation
 public actor TranslationService {
   public init() {}
 
-  /// Check if Foundation Models translation is available
+  /// Check if Translation framework is available on this system
   public var isAvailable: Bool {
-    #if canImport(FoundationModels)
-      if #available(macOS 26, *) {
-        return SystemLanguageModel.default.isAvailable
+    #if canImport(Translation)
+      if #available(macOS 26, iOS 26, *) {
+        return true
       }
     #endif
     return false
   }
 
+  /// Check if a specific language pair is available (and downloaded)
+  public func isLanguagePairAvailable(
+    from source: Language,
+    to target: Language
+  ) async -> Bool {
+    #if canImport(Translation)
+      if #available(macOS 26, iOS 26, *) {
+        let availability = LanguageAvailability()
+        let status = await availability.status(
+          from: source.localeLanguage,
+          to: target.localeLanguage
+        )
+        return status == .installed
+      }
+    #endif
+    return false
+  }
+
+  /// Translate text from one language to another
+  ///
+  /// When sourceLanguage is `.auto`:
+  /// - If target is English → assumes source is French
+  /// - If target is French → assumes source is English
   public func translate(
     _ text: String,
     from sourceLanguage: Language = .auto,
     to targetLanguage: Language
   ) async throws(TranslationError) -> TranslationResult {
-    #if canImport(FoundationModels)
-      guard #available(macOS 26, *) else {
-        throw .foundationModelsUnavailable
+    #if canImport(Translation)
+      guard #available(macOS 26, iOS 26, *) else {
+        throw .translationUnavailable
       }
-
-      guard isAvailable else {
-        throw .foundationModelsUnavailable
-      }
-
-      // Validate language pair
-      guard targetLanguage != .auto else {
-        throw .invalidLanguagePair
-      }
-
-      // Build translation prompt
-      let promptText = buildTranslationPrompt(
-        text: text,
-        sourceLanguage: sourceLanguage,
-        targetLanguage: targetLanguage
-      )
 
       do {
-        // Create a language model session
-        let session = LanguageModelSession()
+        // Determine source language
+        // When auto-detecting:
+        // - If target is English → defaults to French (for backward compatibility)
+        // - If target is any other language → assumes English source (most common in tech)
+        let effectiveSource: Language
+        if sourceLanguage == .auto {
+          switch targetLanguage {
+          case .english:
+            effectiveSource = .french  // Default for backward compatibility
+          case .french, .dutch, .german, .spanish, .italian, .japanese, .korean,
+               .portuguese, .russian, .chineseSimplified, .chineseTraditional,
+               .arabic, .hindi, .indonesian, .polish, .thai, .turkish, .ukrainian, .vietnamese:
+            effectiveSource = .english  // Most common: translate English content to other languages
+          case .auto:
+            effectiveSource = .english  // Fallback
+          }
+        } else {
+          effectiveSource = sourceLanguage
+        }
 
-        // Create prompt
-        let prompt = Prompt(promptText)
+        // Check availability
+        let availability = LanguageAvailability()
+        let status = await availability.status(
+          from: effectiveSource.localeLanguage,
+          to: targetLanguage.localeLanguage
+        )
 
-        // Generate translation using the session
-        let response = try await session.respond(to: prompt)
+        switch status {
+        case .installed:
+          break  // Good to go
+        case .supported:
+          throw TranslationError.downloadRequired
+        case .unsupported:
+          throw TranslationError.languageNotSupported(
+            "\(effectiveSource.displayName) → \(targetLanguage.displayName)")
+        @unknown default:
+          throw TranslationError.translationFailed("Unknown availability status")
+        }
 
-        // Clean up the result (remove any extra formatting)
-        let cleanedText = cleanTranslationResult(response.content)
+        // Parse markdown and extract translatable text segments
+        let preserver = MarkdownPreserver(markdown: text)
+        let textsToTranslate = preserver.translatableTexts
 
-        // Determine actual source language
-        let actualSource =
-          sourceLanguage == .auto
-          ? detectSourceLanguage(text, targetLanguage: targetLanguage)
-          : sourceLanguage
+        // If no translatable text, return original
+        guard !textsToTranslate.isEmpty else {
+          return TranslationResult(
+            originalText: text,
+            translatedText: text,
+            sourceLanguage: effectiveSource,
+            targetLanguage: targetLanguage
+          )
+        }
+
+        // Create session and translate only the text segments
+        let session = TranslationSession(
+          installedSource: effectiveSource.localeLanguage,
+          target: targetLanguage.localeLanguage
+        )
+
+        // Batch translate all text segments
+        let requests = textsToTranslate.map { TranslationSession.Request(sourceText: $0) }
+        let responses = try await session.translations(from: requests)
+        let translatedTexts = responses.map { $0.targetText }
+
+        // Apply translations back to original markdown structure
+        let restoredText = preserver.apply(translations: translatedTexts)
+
+        // Use actual detected source from first response
+        let actualSource = responses.first.flatMap { Language.from(localeLanguage: $0.sourceLanguage) } ?? effectiveSource
 
         return TranslationResult(
           originalText: text,
-          translatedText: cleanedText,
+          translatedText: restoredText,
           sourceLanguage: actualSource,
           targetLanguage: targetLanguage
         )
+      } catch let error as TranslationError {
+        throw error
       } catch {
-        throw TranslationError.translationFailed(error.localizedDescription)
+        throw .translationFailed(error.localizedDescription)
       }
     #else
-      throw .foundationModelsUnavailable
+      throw .translationUnavailable
     #endif
   }
 
+  /// Batch translate multiple texts efficiently
+  ///
+  /// Assumes source is opposite of target (French↔English)
   public func translateBatch(
     _ texts: [String],
     to targetLanguage: Language
   ) async throws(TranslationError) -> [TranslationResult] {
-    var results: [TranslationResult] = []
+    #if canImport(Translation)
+      guard #available(macOS 26, iOS 26, *) else {
+        throw .translationUnavailable
+      }
 
-    for text in texts {
-      let result = try await translate(text, to: targetLanguage)
-      results.append(result)
-    }
+      guard !texts.isEmpty else { return [] }
 
-    return results
-  }
+      do {
+        // Determine source language based on target
+        // Assumes: English content → other languages, or other languages → English
+        let effectiveSource: Language
+        switch targetLanguage {
+        case .english:
+          effectiveSource = .french  // Default for backward compatibility
+        case .french, .dutch, .german, .spanish, .italian, .japanese, .korean,
+             .portuguese, .russian, .chineseSimplified, .chineseTraditional,
+             .arabic, .hindi, .indonesian, .polish, .thai, .turkish, .ukrainian, .vietnamese:
+          effectiveSource = .english  // Most common: translate English content to other languages
+        case .auto:
+          effectiveSource = .english  // Fallback
+        }
 
-  // MARK: - Private Helpers
+        // Check availability
+        let availability = LanguageAvailability()
+        let status = await availability.status(
+          from: effectiveSource.localeLanguage,
+          to: targetLanguage.localeLanguage
+        )
 
-  private func buildTranslationPrompt(
-    text: String,
-    sourceLanguage: Language,
-    targetLanguage: Language
-  ) -> String {
-    let sourceLang =
-      sourceLanguage == .auto
-      ? "auto-detected language" : sourceLanguage.displayName
-    let targetLang = targetLanguage.displayName
+        switch status {
+        case .installed:
+          break
+        case .supported:
+          throw TranslationError.downloadRequired
+        case .unsupported:
+          throw TranslationError.languageNotSupported(
+            "\(effectiveSource.displayName) → \(targetLanguage.displayName)")
+        @unknown default:
+          throw TranslationError.translationFailed("Unknown availability status")
+        }
 
-    return """
-      Translate the following text from \(sourceLang) to \(targetLang).
-      Preserve markdown formatting, code blocks (```), file paths, URLs, and @mentions exactly as they appear.
-      Only translate the natural language text.
+        // Parse markdown and extract translatable segments from each text
+        let preservers = texts.map { MarkdownPreserver(markdown: $0) }
 
-      Text to translate:
-      \(text)
+        // Collect all translatable segments with their indices
+        var allSegments: [(textIndex: Int, segmentIndex: Int, text: String)] = []
+        for (textIndex, preserver) in preservers.enumerated() {
+          for (segmentIndex, unit) in preserver.translatableUnits.enumerated() {
+            allSegments.append((textIndex, segmentIndex, unit.content))
+          }
+        }
 
-      Translation:
-      """
-  }
+        // If nothing to translate, return originals
+        guard !allSegments.isEmpty else {
+          return texts.map {
+            TranslationResult(
+              originalText: $0,
+              translatedText: $0,
+              sourceLanguage: effectiveSource,
+              targetLanguage: targetLanguage
+            )
+          }
+        }
 
-  private func cleanTranslationResult(_ text: String) -> String {
-    // Remove common model artifacts
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Create session and batch translate all segments
+        let session = TranslationSession(
+          installedSource: effectiveSource.localeLanguage,
+          target: targetLanguage.localeLanguage
+        )
 
-    // Remove "Translation:" prefix if present
-    if trimmed.lowercased().hasPrefix("translation:") {
-      return trimmed.dropFirst("translation:".count)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+        let requests = allSegments.map { TranslationSession.Request(sourceText: $0.text) }
+        let responses = try await session.translations(from: requests)
 
-    return trimmed
-  }
+        // Group translations back by original text index
+        var translationsByText: [[String]] = preservers.map { Array(repeating: "", count: $0.translatableUnits.count) }
+        for (index, response) in responses.enumerated() {
+          let segment = allSegments[index]
+          translationsByText[segment.textIndex][segment.segmentIndex] = response.targetText
+        }
 
-  private func detectSourceLanguage(
-    _ text: String,
-    targetLanguage: Language
-  ) -> Language {
-    // Simple heuristic: if target is English, assume source is French and vice versa
-    // In production, you could use NLLanguageRecognizer for more accuracy
-    switch targetLanguage {
-    case .english:
-      return .french
-    case .french:
-      return .english
-    case .auto:
-      return .english  // Default fallback
-    }
+        // Apply translations to each original
+        return zip(zip(texts, preservers), translationsByText).map {
+          (pair: (String, MarkdownPreserver), translations: [String]) in
+          let (original, preserver) = pair
+          let restoredText = preserver.apply(translations: translations)
+          return TranslationResult(
+            originalText: original,
+            translatedText: restoredText,
+            sourceLanguage: effectiveSource,
+            targetLanguage: targetLanguage
+          )
+        }
+      } catch let error as TranslationError {
+        throw error
+      } catch {
+        throw .translationFailed(error.localizedDescription)
+      }
+    #else
+      throw .translationUnavailable
+    #endif
   }
 }

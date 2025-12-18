@@ -54,7 +54,7 @@ public struct PRCommentsFormatter: Sendable {
     var lines: [String] = []
 
     let date = formatDate(comment.createdAt)
-    lines.append("[\(number)] @\(comment.author.login) • \(date)")
+    lines.append("[\(number)] @\(comment.author.login) • \(date) • ID: \(comment.id)")
     lines.append(comment.body)
 
     return lines.joined(separator: "\n")
@@ -65,7 +65,7 @@ public struct PRCommentsFormatter: Sendable {
 
     let date = review.submittedAt.flatMap(formatDate) ?? "unknown"
     let stateEmoji = reviewStateEmoji(review.state)
-    lines.append("[\(number)] \(stateEmoji) @\(review.author.login) • \(date)")
+    lines.append("[\(number)] \(stateEmoji) @\(review.author.login) • \(date) • Thread: \(review.id)")
 
     // Review body (overall comment)
     if let body = review.body, !body.isEmpty {
@@ -90,7 +90,7 @@ public struct PRCommentsFormatter: Sendable {
     var lines: [String] = []
 
     let location = comment.line.map { ":\($0)" } ?? ""
-    lines.append("  📍 \(comment.path)\(location)")
+    lines.append("  📍 \(comment.path)\(location) • ID: \(comment.id)")
 
     // Indent the comment body
     let indentedBody = comment.body
