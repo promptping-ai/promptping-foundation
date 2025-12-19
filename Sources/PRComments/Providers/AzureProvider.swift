@@ -129,7 +129,8 @@ private struct AzurePR: Codable {
       body: description ?? "",
       comments: [],
       reviews: reviews,
-      files: nil
+      files: nil,
+      number: pullRequestId
     )
   }
 

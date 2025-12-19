@@ -185,7 +185,8 @@ private struct GitLabMR: Codable {
       body: description ?? "",
       comments: generalComments,
       reviews: reviews,
-      files: nil
+      files: nil,
+      number: nil  // GitLab uses IID, not exposed in current API
     )
   }
 }

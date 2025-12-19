@@ -193,7 +193,7 @@ struct PRCommentsTests {
     let formatter = PRCommentsFormatter()
     let output = formatter.format(pr, includeBody: false)
 
-    #expect(output.isEmpty)
+    #expect(output == "No comments found.")
   }
 
   @Test("Handle multiline comment body")

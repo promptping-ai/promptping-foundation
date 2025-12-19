@@ -7,12 +7,17 @@ public struct PullRequest: Codable, Sendable {
   public let comments: [Comment]
   public let reviews: [Review]
   public let files: [FileChange]?
+  public let number: Int?
 
-  public init(body: String, comments: [Comment], reviews: [Review], files: [FileChange]? = nil) {
+  public init(
+    body: String, comments: [Comment], reviews: [Review], files: [FileChange]? = nil,
+    number: Int? = nil
+  ) {
     self.body = body
     self.comments = comments
     self.reviews = reviews
     self.files = files
+    self.number = number
   }
 }
 
