@@ -42,6 +42,11 @@ public struct PRCommentsFormatter: Sendable {
       }
     }
 
+    // Handle empty PR
+    if output.isEmpty {
+      return "No comments found."
+    }
+
     return output.joined(separator: "\n")
   }
 
