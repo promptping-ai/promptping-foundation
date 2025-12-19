@@ -46,6 +46,7 @@ public struct CLIHelper: Sendable {
   }
 
   /// Execute a command and return stdout
+  /// Note: Timeout handling would require Task.withTimeout wrapper (future enhancement)
   public func execute(
     executable: Subprocess.Executable,
     arguments: [String]
