@@ -1,0 +1,18 @@
+#!/bin/bash
+# Post-checkout hook: Re-index code after switching branches
+
+# Get the project directory (works for both regular repos and submodules)
+PROJECT_DIR="$(git rev-parse --show-toplevel)"
+
+BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+
+# $3 is 1 if it's a branch checkout, 0 if it's a file checkout
+if [ "$3" = "1" ]; then
+  if [ -x "$BINARY" ]; then
+    echo "📚 [post-checkout] Re-indexing after branch switch..."
+    ("$BINARY" index "$PROJECT_DIR" > /tmp/code-search-mcp-post-checkout.log 2>&1 &)
+  else
+    echo "⚠️  code-search-mcp not found at $BINARY"
+    echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
+  fi
+fi
