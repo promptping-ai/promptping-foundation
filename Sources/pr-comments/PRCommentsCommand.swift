@@ -88,12 +88,7 @@ struct View: AsyncParsableCommand {
 
     // Create provider
     let factory = ProviderFactory()
-    let providerType: ProviderType?
-    if let providerStr = provider {
-      providerType = ProviderType(rawValue: providerStr.capitalized)
-    } else {
-      providerType = nil
-    }
+    let providerType = try parseProviderType(provider)
 
     let prProvider = try await factory.createProvider(manualType: providerType)
     FileHandle.standardError.write("Using \(prProvider.name) provider\n".data(using: .utf8)!)
@@ -428,12 +423,7 @@ struct Reply: AsyncParsableCommand {
 
     // Create provider and post comment
     let factory = ProviderFactory()
-    let providerType: ProviderType?
-    if let providerStr = provider {
-      providerType = ProviderType(rawValue: providerStr.capitalized)
-    } else {
-      providerType = nil
-    }
+    let providerType = try parseProviderType(provider)
 
     let prProvider = try await factory.createProvider(manualType: providerType)
 
@@ -666,8 +656,15 @@ private func parseLanguage(_ code: String) throws -> Language {
 
 private func parseProviderType(_ str: String?) throws -> ProviderType? {
   guard let str = str else { return nil }
-  guard let type = ProviderType(rawValue: str.lowercased()) else {
+  // Match case-insensitively against known provider names
+  switch str.lowercased() {
+  case "github", "gh":
+    return .github
+  case "gitlab", "gl":
+    return .gitlab
+  case "azure", "azdo", "az":
+    return .azure
+  default:
     throw ValidationError("Invalid provider '\(str)'. Use: github, gitlab, or azure")
   }
-  return type
 }

@@ -11,36 +11,36 @@ public struct AzureProvider: PRProvider {
   public func fetchPR(identifier: String, repo: String?) async throws -> PullRequest {
     let azPath = try await cli.findExecutable(name: "az")
 
-    // Fetch basic PR info
-    var prArgs: [String] = ["repos", "pr", "show"]
-    if !identifier.isEmpty {
-      prArgs.append(contentsOf: ["--id", identifier])
-    }
-    prArgs.append(contentsOf: ["--output", "json"])
-
-    if let repo = repo {
-      prArgs.append(contentsOf: ["--repository", repo])
-    }
-
+    // Fetch basic PR info - Azure PRs are uniquely identified by ID across the org
+    let prArgs: [String] = ["repos", "pr", "show", "--id", identifier, "--output", "json"]
     let prOutput = try await cli.execute(executable: azPath, arguments: prArgs)
 
-    // Fetch PR threads
-    var threadsArgs: [String] = ["repos", "pr", "list-threads"]
-    if !identifier.isEmpty {
-      threadsArgs.append(contentsOf: ["--id", identifier])
-    }
-    threadsArgs.append(contentsOf: ["--output", "json"])
-
-    if let repo = repo {
-      threadsArgs.append(contentsOf: ["--repository", repo])
-    }
-
-    let threadsOutput = try await cli.execute(executable: azPath, arguments: threadsArgs)
-
-    // Parse Azure JSON
+    // Parse PR to get project and repository info for thread lookup
     let decoder = JSONDecoder()
     let azurePR = try decoder.decode(AzurePR.self, from: Data(prOutput))
-    let azureThreads = try decoder.decode([AzurePRThread].self, from: Data(threadsOutput))
+
+    // Fetch PR threads using devops invoke (REST API)
+    // Azure DevOps requires project and repository for thread lookup
+    let threadsArgs: [String] = [
+      "devops", "invoke",
+      "--area", "git",
+      "--resource", "pullRequestThreads",
+      "--route-parameters",
+      "project=\(azurePR.repository.project.name)",
+      "repositoryId=\(azurePR.repository.name)",
+      "pullRequestId=\(identifier)",
+      "--output", "json",
+    ]
+
+    var azureThreads: [AzurePRThread] = []
+    do {
+      let threadsOutput = try await cli.execute(executable: azPath, arguments: threadsArgs)
+      let threadsResponse = try decoder.decode(AzureThreadsResponse.self, from: Data(threadsOutput))
+      azureThreads = threadsResponse.value
+    } catch {
+      // If thread fetch fails, continue with empty threads
+      // This can happen if user doesn't have permissions
+    }
 
     return azurePR.toPullRequest(threads: azureThreads)
   }
@@ -97,18 +97,32 @@ public struct AzureProvider: PRProvider {
 
 // MARK: - Azure-specific models
 
-/// Azure Pull Request structure (simplified)
+/// Response wrapper for devops invoke (threads API)
+private struct AzureThreadsResponse: Codable {
+  let value: [AzurePRThread]
+  let count: Int?
+}
+
+/// Azure Pull Request structure
 private struct AzurePR: Codable {
   let title: String
   let description: String?
   let pullRequestId: Int
+  let repository: AzureRepository
+}
 
-  enum CodingKeys: String, CodingKey {
-    case title
-    case description
-    case pullRequestId
-  }
+/// Azure Repository structure
+private struct AzureRepository: Codable {
+  let name: String
+  let project: AzureProject
+}
 
+/// Azure Project structure
+private struct AzureProject: Codable {
+  let name: String
+}
+
+extension AzurePR {
   func toPullRequest(threads: [AzurePRThread]) -> PullRequest {
     // Convert Azure threads to our Review model
     let reviews = threads.map { thread in
