@@ -1,9 +1,9 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
   name: "promptping-foundation",
-  platforms: [.macOS(.v15)],
+  platforms: [.macOS(.v26)],
   products: [
     .library(
       name: "PromptPingFoundation",
@@ -16,6 +16,14 @@ let package = Package(
     .executable(
       name: "bump-version",
       targets: ["bump-version"]
+    ),
+    .library(
+      name: "PRComments",
+      targets: ["PRComments"]
+    ),
+    .executable(
+      name: "pr-comments",
+      targets: ["pr-comments"]
     ),
     .plugin(
       name: "InstallDaemon",
@@ -42,6 +50,11 @@ let package = Package(
     .package(
       url: "https://github.com/apple/swift-argument-parser.git",
       from: "1.3.0"
+    ),
+    // Markdown parsing for translation preservation
+    .package(
+      url: "https://github.com/swiftlang/swift-markdown.git",
+      from: "0.5.0"
     ),
   ],
   targets: [
@@ -76,6 +89,31 @@ let package = Package(
         "BumpVersion",
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ]
+    ),
+
+    // PR comments library (parses and formats GitHub PR comments)
+    .target(
+      name: "PRComments",
+      dependencies: [
+        .product(name: "Subprocess", package: "swift-subprocess"),
+        .product(name: "Markdown", package: "swift-markdown"),
+      ],
+      linkerSettings: [
+        // Translation.framework for neural machine translation (iOS 17.4+ / macOS 14.4+)
+        // NOT FoundationModels - Translation has no context limits and is purpose-built
+        .linkedFramework("Translation", .when(platforms: [.macOS, .iOS]))
+      ]
+    ),
+
+    // PR comments CLI tool (installable via swift package experimental-install)
+    .executableTarget(
+      name: "pr-comments",
+      dependencies: [
+        "PRComments",
+        .product(name: "Subprocess", package: "swift-subprocess"),
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
+      ],
+      exclude: ["README.md"]
     ),
 
     // Executable for plugin to invoke (plugins can't import libraries directly)
@@ -117,6 +155,10 @@ let package = Package(
     .testTarget(
       name: "BumpVersionTests",
       dependencies: ["BumpVersion"]
+    ),
+    .testTarget(
+      name: "PRCommentsTests",
+      dependencies: ["PRComments"]
     ),
   ]
 )
