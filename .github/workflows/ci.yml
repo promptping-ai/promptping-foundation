@@ -13,4 +13,8 @@ jobs:
 
   rules:
     uses: promptping-ai/.github/.github/workflows/swift-rules-check.yml@main
+
+  review:
+    if: github.event_name == 'pull_request' && github.event.action == 'opened'
+    uses: promptping-ai/.github/.github/workflows/swift-review.yml@main
     secrets: inherit
