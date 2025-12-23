@@ -61,73 +61,85 @@ struct InstallDaemonPlugin: CommandPlugin {
     Diagnostics.remark("  Port: \(port)")
     Diagnostics.remark("  Products: \(config.products.joined(separator: ", "))")
 
-    // Build all products once and collect artifacts
-    var allArtifacts: [PackageManager.BuildResult.BuiltArtifact] = []
+    // Build products or use existing artifacts
+    var artifactURLs: [URL] = []
 
-    for product in config.products {
-      if skipBuild {
-        Diagnostics.remark("  Skipping build for: \(product)")
-      } else {
+    if skipBuild {
+      // Use pre-built artifacts from .build/release/ directly
+      // This avoids triggering build plugins (like gRPC) that may have sandbox issues
+      let releaseDir = context.package.directoryURL
+        .appendingPathComponent(".build/release")
+
+      Diagnostics.remark("  Using pre-built artifacts from .build/release/")
+
+      for product in config.products {
+        let artifactPath = releaseDir.appendingPathComponent(product)
+        if FileManager.default.fileExists(atPath: artifactPath.path) {
+          artifactURLs.append(artifactPath)
+          Diagnostics.remark("    Found: \(product)")
+        } else {
+          Diagnostics.error("  Pre-built artifact not found: \(product)")
+          Diagnostics.error("  Run 'swift build -c release' first, then retry with --skip-build")
+          throw PluginError.artifactsNotFound
+        }
+      }
+    } else {
+      // Build all products and collect artifacts
+      for product in config.products {
         Diagnostics.remark("  Building: \(product)")
-      }
 
-      let result = try packageManager.build(
-        .product(product),
-        parameters: .init(configuration: .release)
-      )
+        let result = try packageManager.build(
+          .product(product),
+          parameters: .init(configuration: .release)
+        )
 
-      guard result.succeeded else {
-        Diagnostics.error("Build failed for \(product)")
-        throw PluginError.buildFailed(product)
-      }
+        guard result.succeeded else {
+          Diagnostics.error("Build failed for \(product)")
+          throw PluginError.buildFailed(product)
+        }
 
-      let productArtifacts = result.builtArtifacts.filter { artifact in
-        config.products.contains(artifact.url.lastPathComponent)
-      }
-      allArtifacts.append(contentsOf: productArtifacts)
+        let productArtifacts = result.builtArtifacts.filter { artifact in
+          config.products.contains(artifact.url.lastPathComponent)
+        }
+        artifactURLs.append(contentsOf: productArtifacts.map(\.url))
 
-      if !skipBuild {
-        Diagnostics.remark("  Built: \(product)")
+        Diagnostics.remark("    Built: \(product)")
       }
     }
 
-    // Deduplicate artifacts by URL
-    let uniqueArtifacts = Dictionary(grouping: allArtifacts, by: \.url)
-      .compactMapValues(\.first)
-      .values
+    // Deduplicate by path
+    let uniqueArtifacts = Array(Set(artifactURLs))
 
     guard !uniqueArtifacts.isEmpty else {
       throw PluginError.artifactsNotFound
     }
 
-    let artifacts = Array(uniqueArtifacts)
-
-    // Install binaries
-    let swiftpmBin = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".swiftpm/bin")
+    // Install binaries to package's bin/ directory (sandbox-safe)
+    // User creates symlinks to ~/.swiftpm/bin/ for PATH access
+    let packageBin = context.package.directoryURL.appendingPathComponent("bin")
 
     do {
       try FileManager.default.createDirectory(
-        at: swiftpmBin,
+        at: packageBin,
         withIntermediateDirectories: true
       )
     } catch {
       throw PluginError.installationFailed(
-        "Failed to create directory \(swiftpmBin.path): \(error.localizedDescription)"
+        "Failed to create directory \(packageBin.path): \(error.localizedDescription)"
       )
     }
 
     // Atomic binary installation using atomic-install-tool
     // (Plugins can't import library targets directly - SE-0303)
-    Diagnostics.remark("  Installing binaries atomically...")
+    Diagnostics.remark("  Installing binaries to package bin/ directory...")
 
     let tool = try context.tool(named: "atomic-install-tool")
 
-    // Build operations JSON
-    let operations = artifacts.map { artifact -> [String: String] in
-      let destination = swiftpmBin.appendingPathComponent(artifact.url.lastPathComponent)
+    // Build operations JSON - install to package bin/
+    let operations = uniqueArtifacts.map { artifactURL -> [String: String] in
+      let destination = packageBin.appendingPathComponent(artifactURL.lastPathComponent)
       return [
-        "source": artifact.url.path,
+        "source": artifactURL.path,
         "destination": destination.path,
       ]
     }
@@ -185,53 +197,45 @@ struct InstallDaemonPlugin: CommandPlugin {
       }
     }
 
-    // Generate and install plist (if daemon product specified)
+    // Generate plist to package directory (sandbox-safe)
+    // User copies to ~/Library/LaunchAgents/ manually
+    let swiftpmBin = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".swiftpm/bin")
+
     if let daemonProduct = config.daemonProduct {
       let plist = generatePlist(
         config: config,
         daemonProduct: daemonProduct,
-        swiftpmBin: swiftpmBin.path,
+        swiftpmBin: swiftpmBin.path,  // Plist references symlinked location
         port: port,
         logLevel: logLevel
       )
 
-      let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/LaunchAgents")
-
-      try FileManager.default.createDirectory(
-        at: launchAgentsDir,
-        withIntermediateDirectories: true
-      )
-
-      let plistPath = launchAgentsDir.appendingPathComponent("\(config.serviceLabel).plist")
+      let plistPath = packageBin.appendingPathComponent("\(config.serviceLabel).plist")
       try plist.write(to: plistPath, atomically: true, encoding: .utf8)
 
-      Diagnostics.remark("  Installed plist: \(plistPath.path)")
-
-      // Bootstrap service
-      let uid = getuid()
-      let process = Process()
-      process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-      process.arguments = ["bootstrap", "gui/\(uid)", plistPath.path]
-
-      do {
-        try process.run()
-        process.waitUntilExit()
-
-        if process.terminationStatus == 0 {
-          Diagnostics.remark("  Service loaded successfully")
-        } else {
-          Diagnostics.warning("  Service may require manual loading")
-        }
-      } catch {
-        Diagnostics.warning("  Could not load service: \(error)")
-      }
+      Diagnostics.remark("  Generated plist: \(plistPath.path)")
     }
 
+    // Print setup instructions
     Diagnostics.remark("")
-    Diagnostics.remark("Installation complete!")
+    Diagnostics.remark("═══════════════════════════════════════════════════════════")
+    Diagnostics.remark("  BUILD COMPLETE - Manual setup required (one-time)")
+    Diagnostics.remark("═══════════════════════════════════════════════════════════")
     Diagnostics.remark("")
-    Diagnostics.remark("Add to ~/.claude/settings.json:")
+    Diagnostics.remark("Step 1: Create symlinks to ~/.swiftpm/bin/")
+    Diagnostics.remark("  cd \(context.package.directoryURL.path)")
+    Diagnostics.remark("  ln -sf $(pwd)/bin/* ~/.swiftpm/bin/")
+    Diagnostics.remark("")
+
+    if config.daemonProduct != nil {
+      Diagnostics.remark("Step 2: Install LaunchAgent plist")
+      Diagnostics.remark("  cp bin/\(config.serviceLabel).plist ~/Library/LaunchAgents/")
+      Diagnostics.remark("  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/\(config.serviceLabel).plist")
+      Diagnostics.remark("")
+    }
+
+    Diagnostics.remark("Step 3: Add to ~/.claude/settings.json:")
     Diagnostics.remark(
       """
       {
@@ -246,6 +250,8 @@ struct InstallDaemonPlugin: CommandPlugin {
         }
       }
       """)
+    Diagnostics.remark("")
+    Diagnostics.remark("Future rebuilds will automatically update via symlinks!")
   }
 
   private func performUninstall(
