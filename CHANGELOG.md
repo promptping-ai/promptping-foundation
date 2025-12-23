@@ -2,6 +2,29 @@
 
 All notable changes to promptping-foundation will be documented in this file.
 
+## [0.2.0-alpha.1] - 2025-12-23
+
+### Added
+
+- **pr-comments CLI** - Multi-provider CLI tool for viewing and interacting with PR/MR comments
+  - Supports GitHub (`gh`), GitLab (`glab`), and Azure DevOps (`az`) providers
+  - Auto-detects provider from git remote or manual `--provider` override
+  - On-device French↔English translation via Apple's Translation.framework
+  - Extracts and displays inline code review comments with context
+  - Multiple output formats: terminal (colored), markdown, JSON
+
+- **Subcommands:**
+  - `view` - Display PR comments with optional translation
+  - `reply` - Reply to a PR with optional translation
+  - `reply-to` - Reply to a specific comment or thread
+  - `resolve` - Resolve a discussion thread (GitLab/Azure)
+
+- **PRComments Library** - Reusable components for PR comment management
+  - `PRProvider` protocol with GitHub, GitLab, Azure implementations
+  - `TranslationService` using Translation.framework
+  - `MarkdownPreserver` for maintaining formatting during translation
+  - `PRCommentsFormatter` for multiple output formats
+
 ## [0.1.0] - 2025-12-17
 
 ### Added
