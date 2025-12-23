@@ -65,7 +65,8 @@ public struct PRCommentsFormatter: Sendable {
 
     let date = review.submittedAt.flatMap(formatDate) ?? "unknown"
     let stateEmoji = reviewStateEmoji(review.state)
-    lines.append("[\(number)] \(stateEmoji) @\(review.author.login) • \(date) • Thread: \(review.id)")
+    lines.append(
+      "[\(number)] \(stateEmoji) @\(review.author.login) • \(date) • Thread: \(review.id)")
 
     // Review body (overall comment)
     if let body = review.body, !body.isEmpty {

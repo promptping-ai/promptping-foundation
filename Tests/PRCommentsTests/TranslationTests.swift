@@ -156,14 +156,14 @@ struct MarkdownPreserverTests {
   @Test("Extract only translatable text, skip code blocks")
   func testTextExtraction() {
     let markdown = """
-    This is **bold** text.
+      This is **bold** text.
 
-    ```swift
-    let code = "skip me"
-    ```
+      ```swift
+      let code = "skip me"
+      ```
 
-    More text with `inline code`.
-    """
+      More text with `inline code`.
+      """
 
     let preserver = MarkdownPreserver(markdown: markdown)
     let texts = preserver.translatableTexts
