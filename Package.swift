@@ -10,6 +10,14 @@ let package = Package(
       targets: ["PromptPingFoundation"]
     ),
     .library(
+      name: "BumpVersion",
+      targets: ["BumpVersion"]
+    ),
+    .executable(
+      name: "bump-version",
+      targets: ["bump-version"]
+    ),
+    .library(
       name: "PRComments",
       targets: ["PRComments"]
     ),
@@ -63,6 +71,24 @@ let package = Package(
     .target(
       name: "AtomicInstall",
       dependencies: []
+    ),
+
+    // Version bumping library (generic, reusable across org)
+    .target(
+      name: "BumpVersion",
+      dependencies: [
+        .product(name: "SemanticVersion", package: "SemanticVersion"),
+        .product(name: "Subprocess", package: "swift-subprocess"),
+      ]
+    ),
+
+    // Generic version bump CLI tool (installable via swift package experimental-install)
+    .executableTarget(
+      name: "bump-version",
+      dependencies: [
+        "BumpVersion",
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
+      ]
     ),
 
     // PR comments library (parses and formats GitHub PR comments)
@@ -125,6 +151,10 @@ let package = Package(
     .testTarget(
       name: "AtomicInstallTests",
       dependencies: ["AtomicInstall"]
+    ),
+    .testTarget(
+      name: "BumpVersionTests",
+      dependencies: ["BumpVersion"]
     ),
     .testTarget(
       name: "PRCommentsTests",
