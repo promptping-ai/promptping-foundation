@@ -78,8 +78,8 @@ public actor TranslationService {
           case .english:
             effectiveSource = .french  // Default for backward compatibility
           case .french, .dutch, .german, .spanish, .italian, .japanese, .korean,
-               .portuguese, .russian, .chineseSimplified, .chineseTraditional,
-               .arabic, .hindi, .indonesian, .polish, .thai, .turkish, .ukrainian, .vietnamese:
+            .portuguese, .russian, .chineseSimplified, .chineseTraditional,
+            .arabic, .hindi, .indonesian, .polish, .thai, .turkish, .ukrainian, .vietnamese:
             effectiveSource = .english  // Most common: translate English content to other languages
           case .auto:
             effectiveSource = .english  // Fallback
@@ -136,7 +136,9 @@ public actor TranslationService {
         let restoredText = preserver.apply(translations: translatedTexts)
 
         // Use actual detected source from first response
-        let actualSource = responses.first.flatMap { Language.from(localeLanguage: $0.sourceLanguage) } ?? effectiveSource
+        let actualSource =
+          responses.first.flatMap { Language.from(localeLanguage: $0.sourceLanguage) }
+          ?? effectiveSource
 
         return TranslationResult(
           originalText: text,
@@ -176,8 +178,8 @@ public actor TranslationService {
         case .english:
           effectiveSource = .french  // Default for backward compatibility
         case .french, .dutch, .german, .spanish, .italian, .japanese, .korean,
-             .portuguese, .russian, .chineseSimplified, .chineseTraditional,
-             .arabic, .hindi, .indonesian, .polish, .thai, .turkish, .ukrainian, .vietnamese:
+          .portuguese, .russian, .chineseSimplified, .chineseTraditional,
+          .arabic, .hindi, .indonesian, .polish, .thai, .turkish, .ukrainian, .vietnamese:
           effectiveSource = .english  // Most common: translate English content to other languages
         case .auto:
           effectiveSource = .english  // Fallback
@@ -235,7 +237,9 @@ public actor TranslationService {
         let responses = try await session.translations(from: requests)
 
         // Group translations back by original text index
-        var translationsByText: [[String]] = preservers.map { Array(repeating: "", count: $0.translatableUnits.count) }
+        var translationsByText: [[String]] = preservers.map {
+          Array(repeating: "", count: $0.translatableUnits.count)
+        }
         for (index, response) in responses.enumerated() {
           let segment = allSegments[index]
           translationsByText[segment.textIndex][segment.segmentIndex] = response.targetText

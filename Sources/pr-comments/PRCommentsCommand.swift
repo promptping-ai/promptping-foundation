@@ -66,7 +66,11 @@ struct View: AsyncParsableCommand {
   @Option(name: .long, help: "Provider to use (github, gitlab, azure)")
   var provider: String?
 
-  @Option(name: .shortAndLong, help: "Display language (en, fr, nl, de, es, it, ja, ko, pt, ru, zh, ar, hi, id, pl, th, tr, uk, vi) - translates comments")
+  @Option(
+    name: .shortAndLong,
+    help:
+      "Display language (en, fr, nl, de, es, it, ja, ko, pt, ru, zh, ar, hi, id, pl, th, tr, uk, vi) - translates comments"
+  )
   var language: String?
 
   @Option(name: .long, help: "Output format: plain, markdown, json")

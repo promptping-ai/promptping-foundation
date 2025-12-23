@@ -70,10 +70,11 @@ struct TextNodeExtractor: MarkupWalker {
 
     let trimmed = text.string.trimmingCharacters(in: .whitespaces)
     if !trimmed.isEmpty {
-      units.append(MarkdownPreserver.TranslatableUnit(
-        index: index,
-        content: text.string
-      ))
+      units.append(
+        MarkdownPreserver.TranslatableUnit(
+          index: index,
+          content: text.string
+        ))
     }
   }
 
