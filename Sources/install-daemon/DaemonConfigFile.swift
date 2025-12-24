@@ -94,14 +94,8 @@ struct DaemonConfigFile: Codable {
       .path
 
     let binaries = products.map { product -> BinaryConfig in
-      let sourcePath: URL
-      if skipBuild {
-        // Use existing release build
-        sourcePath = URL(fileURLWithPath: releaseDir).appendingPathComponent(product)
-      } else {
-        // Will be built, path determined after build
-        sourcePath = URL(fileURLWithPath: releaseDir).appendingPathComponent(product)
-      }
+      // Path to the built binary in the release directory
+      let sourcePath = URL(fileURLWithPath: releaseDir).appendingPathComponent(product)
 
       let isDaemon = (product == daemonProduct)
       return BinaryConfig(name: product, sourcePath: sourcePath, isDaemon: isDaemon)
