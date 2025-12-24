@@ -25,6 +25,10 @@ let package = Package(
       name: "pr-comments",
       targets: ["pr-comments"]
     ),
+    .executable(
+      name: "install-daemon",
+      targets: ["install-daemon"]
+    ),
     .plugin(
       name: "InstallDaemon",
       targets: ["InstallDaemonPlugin"]
@@ -114,6 +118,17 @@ let package = Package(
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ],
       exclude: ["README.md"]
+    ),
+
+    // Daemon installation CLI tool (installable via swift package experimental-install)
+    // Bypasses SPM plugin sandbox limitations for packages with complex build plugins (gRPC)
+    .executableTarget(
+      name: "install-daemon",
+      dependencies: [
+        "PromptPingFoundation",
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
+        .product(name: "Logging", package: "swift-log"),
+      ]
     ),
 
     // Executable for plugin to invoke (plugins can't import libraries directly)
