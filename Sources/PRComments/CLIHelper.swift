@@ -85,4 +85,45 @@ public struct CLIHelper: Sendable {
     )
     return String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
   }
+
+  // MARK: - GraphQL Support
+
+  /// Execute a GraphQL query/mutation via `gh api graphql`
+  ///
+  /// Uses GitHub's GraphQL API through the `gh` CLI, which handles authentication automatically.
+  ///
+  /// - Parameters:
+  ///   - query: The GraphQL query or mutation string
+  ///   - variables: Optional dictionary of variables to pass to the query
+  /// - Returns: The raw JSON response bytes
+  /// - Throws: `PRProviderError.commandFailed` if the command fails
+  public func executeGraphQL(
+    query: String,
+    variables: [String: Any]? = nil
+  ) async throws -> [UInt8] {
+    let ghPath = try await findExecutable(name: "gh")
+
+    var args = ["api", "graphql", "-f", "query=\(query)"]
+
+    // Add variables as -F flags (gh handles JSON encoding)
+    if let variables = variables {
+      for (key, value) in variables {
+        // Use -F for non-string values (numbers, booleans) and -f for strings
+        if let stringValue = value as? String {
+          args.append(contentsOf: ["-f", "\(key)=\(stringValue)"])
+        } else if let intValue = value as? Int {
+          args.append(contentsOf: ["-F", "\(key)=\(intValue)"])
+        } else if let boolValue = value as? Bool {
+          args.append(contentsOf: ["-F", "\(key)=\(boolValue)"])
+        } else {
+          // For complex types, JSON encode
+          let jsonData = try JSONSerialization.data(withJSONObject: value)
+          let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+          args.append(contentsOf: ["-f", "\(key)=\(jsonString)"])
+        }
+      }
+    }
+
+    return try await execute(executable: ghPath, arguments: args)
+  }
 }

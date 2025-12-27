@@ -65,8 +65,10 @@ public struct PRCommentsFormatter: Sendable {
 
     let date = review.submittedAt.flatMap(formatDate) ?? "unknown"
     let stateEmoji = reviewStateEmoji(review.state)
+    // Note: review.id is PRR_xxx (review ID), not PRRT_xxx (thread ID)
+    // Thread IDs for resolution are shown on individual comments
     lines.append(
-      "[\(number)] \(stateEmoji) @\(review.author.login) • \(date) • Thread: \(review.id)")
+      "[\(number)] \(stateEmoji) @\(review.author.login) • \(date)")
 
     // Review body (overall comment)
     if let body = review.body, !body.isEmpty {
@@ -91,7 +93,14 @@ public struct PRCommentsFormatter: Sendable {
     var lines: [String] = []
 
     let location = comment.line.map { ":\($0)" } ?? ""
-    lines.append("  📍 \(comment.path)\(location) • ID: \(comment.id)")
+    let pathDisplay = comment.path ?? "(no path)"
+    var idLine = "  📍 \(pathDisplay)\(location) • ID: \(comment.id)"
+
+    // Add thread ID if available (for GitHub thread resolution)
+    if let threadId = comment.threadId {
+      idLine += " • Thread: \(threadId)"
+    }
+    lines.append(idLine)
 
     // Indent the comment body
     let indentedBody = comment.body

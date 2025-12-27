@@ -80,17 +80,27 @@ public struct Review: Codable, Sendable {
 
 public struct ReviewComment: Codable, Sendable {
   public let id: String
-  public let path: String
+  public let path: String?
   public let line: Int?
   public let body: String
   public let createdAt: String
+  /// GraphQL thread ID for resolution (e.g., "PRRT_kwDOQo0_Ns6aBcDe")
+  public let threadId: String?
 
-  public init(id: String, path: String, line: Int?, body: String, createdAt: String) {
+  public init(
+    id: String,
+    path: String?,
+    line: Int?,
+    body: String,
+    createdAt: String,
+    threadId: String? = nil
+  ) {
     self.id = id
     self.path = path
     self.line = line
     self.body = body
     self.createdAt = createdAt
+    self.threadId = threadId
   }
 }
 
