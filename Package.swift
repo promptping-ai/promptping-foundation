@@ -33,6 +33,15 @@ let package = Package(
       name: "InstallDaemon",
       targets: ["InstallDaemonPlugin"]
     ),
+    // Plugin installation library (generic installer for Claude Code plugins)
+    .library(
+      name: "PluginInstall",
+      targets: ["PluginInstall"]
+    ),
+    .executable(
+      name: "plugin-install",
+      targets: ["plugin-install"]
+    ),
   ],
   dependencies: [
     // Modern async subprocess execution
@@ -155,6 +164,21 @@ let package = Package(
       ),
       dependencies: [
         .target(name: "atomic-install-tool")
+      ]
+    ),
+
+    // Plugin installation library (generic installer for Claude Code plugins)
+    .target(
+      name: "PluginInstall",
+      dependencies: []
+    ),
+
+    // Plugin installation CLI tool (installable via swift package experimental-install)
+    .executableTarget(
+      name: "plugin-install",
+      dependencies: [
+        "PluginInstall",
+        .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ]
     ),
 
