@@ -100,6 +100,11 @@ public struct PRCommentsFormatter: Sendable {
     if let threadId = comment.threadId {
       idLine += " • Thread: \(threadId)"
     }
+
+    // Add resolution status indicator
+    if let isResolved = comment.isResolved {
+      idLine += isResolved ? " ✅" : " 🔴"
+    }
     lines.append(idLine)
 
     // Indent the comment body
