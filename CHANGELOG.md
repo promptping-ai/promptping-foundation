@@ -2,6 +2,24 @@
 
 All notable changes to promptping-foundation will be documented in this file.
 
+## [0.2.1] - 2025-12-28
+
+### Added
+
+- **Resolution Status Filtering** - Filter PR comments by thread resolution status
+  - `--unresolved` flag shows only unresolved review threads
+  - `--resolved` flag shows only resolved review threads
+  - Status indicators: ✅ (resolved) and 🔴 (unresolved) displayed on comments
+  - `isResolved` field added to `ReviewComment` model
+
+- **Package-scoped Filter Utility**
+  - `filterByResolutionStatus()` function with `package` access level
+  - Graceful handling of unknown resolution status (includes by default)
+
+### Changed
+
+- `ReviewComment` now includes `isResolved: Bool?` field propagated from GraphQL thread data
+
 ## [0.2.0] - 2025-12-27
 
 ### Added
