@@ -6,6 +6,47 @@ public struct GitHubProvider: PRProvider {
 
   private let cli = CLIHelper()
 
+  // MARK: - GraphQL Queries
+
+  /// Query to fetch review threads with their IDs for resolution
+  private static let reviewThreadsQuery = """
+    query($owner: String!, $repo: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $prNumber) {
+          reviewThreads(first: 100) {
+            nodes {
+              id
+              isResolved
+              path
+              line
+              comments(first: 1) {
+                nodes {
+                  id
+                  body
+                  author {
+                    login
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
+  /// Mutation to resolve a review thread
+  private static let resolveThreadMutation = """
+    mutation($threadId: ID!) {
+      resolveReviewThread(input: {threadId: $threadId}) {
+        thread {
+          id
+          isResolved
+        }
+      }
+    }
+    """
+
   public init() {}
 
   public func fetchPR(identifier: String, repo: String?) async throws -> PullRequest {
@@ -47,6 +88,20 @@ public struct GitHubProvider: PRProvider {
 
     // Merge inline comments into reviews
     pr = mergeInlineComments(pr: pr, inlineComments: inlineComments)
+
+    // Fetch GraphQL thread IDs for resolution support
+    if let prNumber = pr.number {
+      do {
+        let (owner, repoName) = try await parseRepoIdentifier(repo)
+        let threads = try await fetchReviewThreadsGraphQL(
+          owner: owner, repo: repoName, prNumber: prNumber)
+        pr = mergeGraphQLThreads(pr: pr, threads: threads)
+      } catch {
+        // Log warning but don't fail - GraphQL is optional enhancement
+        FileHandle.standardError.write(
+          "⚠️  Could not fetch thread IDs: \(error.localizedDescription)\n".data(using: .utf8)!)
+      }
+    }
 
     return pr
   }
@@ -152,20 +207,23 @@ public struct GitHubProvider: PRProvider {
     }
 
     // Use gh api to post a comment reply
-    // GitHub API: POST /repos/{owner}/{repo}/pulls/comments/{comment_id}/replies
+    // GitHub API: POST /repos/{owner}/{repo}/pulls/{pr}/comments with in_reply_to
+    // Note: The /pulls/comments/{id}/replies endpoint doesn't exist - replies are
+    // created as new comments with in_reply_to referencing the parent comment ID
     var args = [
       "api",
       "-X", "POST",
     ]
 
     if let owner = owner, let repoName = repoName {
-      args.append("repos/\(owner)/\(repoName)/pulls/comments/\(commentId)/replies")
+      args.append("repos/\(owner)/\(repoName)/pulls/\(prIdentifier)/comments")
     } else {
       // Use placeholder syntax when repo not specified (gh will resolve from current repo)
-      args.append("repos/{owner}/{repo}/pulls/comments/\(commentId)/replies")
+      args.append("repos/{owner}/{repo}/pulls/\(prIdentifier)/comments")
     }
 
     args.append(contentsOf: ["-f", "body=\(body)"])
+    args.append(contentsOf: ["-F", "in_reply_to=\(commentId)"])
 
     _ = try await cli.execute(executable: ghPath, arguments: args)
   }
@@ -175,12 +233,208 @@ public struct GitHubProvider: PRProvider {
     threadId: String,
     repo: String?
   ) async throws {
-    // GitHub doesn't have a direct "resolve" API, threads are resolved by replying
-    // This would require fetching the thread and marking it as resolved via GraphQL
-    throw PRProviderError.unsupportedOperation("GitHub thread resolution requires GraphQL API")
+    // Validate thread ID format (should be PRRT_xxx or PRT_xxx)
+    guard threadId.hasPrefix("PRRT_") || threadId.hasPrefix("PRT_") else {
+      throw PRProviderError.invalidConfiguration(
+        """
+        Invalid GitHub thread ID '\(threadId)'. Expected format: PRRT_xxx or PRT_xxx
+        (use 'pr-comments view' to find thread IDs)
+        """
+      )
+    }
+
+    // Execute the GraphQL mutation
+    let output = try await cli.executeGraphQL(
+      query: Self.resolveThreadMutation,
+      variables: ["threadId": threadId]
+    )
+
+    // Parse response to verify success
+    let decoder = JSONDecoder()
+    let response = try decoder.decode(
+      GitHubGraphQLResponse<GitHubResolveThreadData>.self,
+      from: Data(output)
+    )
+
+    // Check for GraphQL errors
+    if let errors = response.errors, !errors.isEmpty {
+      let errorMessages = errors.map(\.message).joined(separator: "; ")
+      if errorMessages.contains("Resource not accessible") {
+        throw PRProviderError.commandFailed(
+          "resolveReviewThread",
+          stderr:
+            "Resource not accessible by integration. (Hint: Ensure 'gh' is authenticated with 'repo' scope. Run 'gh auth refresh -s repo' to fix)"
+        )
+      }
+      throw PRProviderError.commandFailed("GraphQL mutation", stderr: errorMessages)
+    }
+
+    // Verify the thread was resolved
+    guard let thread = response.data?.resolveReviewThread?.thread else {
+      throw PRProviderError.commandFailed(
+        "resolveReviewThread",
+        stderr: "Thread resolution failed or returned unexpected state"
+      )
+    }
+
+    guard thread.isResolved else {
+      throw PRProviderError.commandFailed(
+        "resolveReviewThread",
+        stderr: "Thread was not marked as resolved after mutation"
+      )
+    }
   }
 
   public func isAvailable() async -> Bool {
     return await cli.isInstalled("gh")
+  }
+
+  // MARK: - GraphQL Helpers
+
+  /// Parse a repo string into owner and name components
+  /// - Parameter repo: Repository in "owner/repo" format, or nil to detect from current directory
+  /// - Returns: Tuple of (owner, repoName)
+  private func parseRepoIdentifier(_ repo: String?) async throws -> (owner: String, repo: String) {
+    if let repo = repo {
+      let parts = repo.split(separator: "/", maxSplits: 1)
+      guard parts.count == 2 else {
+        throw PRProviderError.invalidConfiguration(
+          "Invalid repo format '\(repo)'. Expected 'owner/repo'"
+        )
+      }
+      return (String(parts[0]), String(parts[1]))
+    }
+
+    // Try to get from current git remote
+    let remoteURL = try await cli.getGitRemoteURL()
+    return try parseGitRemoteURL(remoteURL)
+  }
+
+  /// Parse a git remote URL into owner and repo
+  private func parseGitRemoteURL(_ url: String) throws -> (owner: String, repo: String) {
+    // Handle SSH format: git@github.com:owner/repo.git
+    if url.contains("git@") {
+      let pattern = #"git@[^:]+:([^/]+)/(.+?)(?:\.git)?$"#
+      if let match = url.range(of: pattern, options: .regularExpression) {
+        let pathPart = url[match].dropFirst(url.distance(from: url.startIndex, to: match.lowerBound))
+        let components = String(pathPart).components(separatedBy: ":")
+        if components.count == 2 {
+          let ownerRepo = components[1].replacingOccurrences(of: ".git", with: "")
+          let parts = ownerRepo.split(separator: "/", maxSplits: 1)
+          if parts.count == 2 {
+            return (String(parts[0]), String(parts[1]))
+          }
+        }
+      }
+    }
+
+    // Handle HTTPS format: https://github.com/owner/repo.git
+    if let urlObj = URL(string: url) {
+      let pathComponents = urlObj.pathComponents.filter { $0 != "/" }
+      if pathComponents.count >= 2 {
+        let owner = pathComponents[0]
+        let repo = pathComponents[1].replacingOccurrences(of: ".git", with: "")
+        return (owner, repo)
+      }
+    }
+
+    throw PRProviderError.invalidConfiguration(
+      "Could not parse repository from git remote URL: \(url)"
+    )
+  }
+
+  /// Fetch review threads via GraphQL to get thread IDs for resolution
+  private func fetchReviewThreadsGraphQL(
+    owner: String,
+    repo: String,
+    prNumber: Int
+  ) async throws -> [GitHubReviewThread] {
+    let output = try await cli.executeGraphQL(
+      query: Self.reviewThreadsQuery,
+      variables: [
+        "owner": owner,
+        "repo": repo,
+        "prNumber": prNumber,
+      ]
+    )
+
+    let decoder = JSONDecoder()
+    let response = try decoder.decode(
+      GitHubGraphQLResponse<GitHubRepositoryData>.self,
+      from: Data(output)
+    )
+
+    // Check for errors but don't fail - gracefully degrade to REST-only
+    if let errors = response.errors, !errors.isEmpty {
+      FileHandle.standardError.write(
+        "⚠️  Could not fetch GraphQL thread IDs: \(errors.map(\.message).joined(separator: "; "))\n"
+          .data(using: .utf8)!
+      )
+      return []
+    }
+
+    return response.data?.repository?.pullRequest?.reviewThreads.nodes ?? []
+  }
+
+  /// Merge GraphQL thread IDs into REST API comments
+  ///
+  /// Matches threads to comments by path + line + author
+  private func mergeGraphQLThreads(
+    pr: PullRequest,
+    threads: [GitHubReviewThread]
+  ) -> PullRequest {
+    guard !threads.isEmpty else { return pr }
+
+    // Build a lookup map: (path, line, author) -> thread ID
+    var threadLookup: [String: String] = [:]
+    for thread in threads {
+      guard let firstComment = thread.comments.nodes.first,
+        let author = firstComment.author?.login,
+        let path = thread.path
+      else { continue }
+
+      let key = "\(path):\(thread.line ?? 0):\(author)"
+      threadLookup[key] = thread.id
+    }
+
+    // Update reviews with thread IDs
+    let updatedReviews = pr.reviews.map { review -> Review in
+      guard let comments = review.comments else { return review }
+
+      let updatedComments = comments.map { comment -> ReviewComment in
+        guard let path = comment.path, let line = comment.line else { return comment }
+        let key = "\(path):\(line):\(review.author.login)"
+
+        if let threadId = threadLookup[key] {
+          return ReviewComment(
+            id: comment.id,
+            path: comment.path,
+            line: comment.line,
+            body: comment.body,
+            createdAt: comment.createdAt,
+            threadId: threadId
+          )
+        }
+        return comment
+      }
+
+      return Review(
+        id: review.id,
+        author: review.author,
+        authorAssociation: review.authorAssociation,
+        body: review.body,
+        submittedAt: review.submittedAt,
+        state: review.state,
+        comments: updatedComments
+      )
+    }
+
+    return PullRequest(
+      body: pr.body,
+      comments: pr.comments,
+      reviews: updatedReviews,
+      files: pr.files,
+      number: pr.number
+    )
   }
 }

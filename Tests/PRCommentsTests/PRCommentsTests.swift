@@ -244,19 +244,31 @@ struct PRCommentsTests {
     #expect(output.contains("ID: IC_kwDOKtest_c5aXYZ"))
   }
 
-  @Test("Formatter displays thread IDs for reviews")
+  @Test("Formatter displays thread IDs for review comments")
   func testThreadIDDisplay() {
+    // Thread IDs (PRRT_xxx) come from GraphQL and are attached to individual comments
+    // Review IDs (PRR_xxx) should NOT be shown as "Thread:" since they're different
     let pr = PullRequest(
       body: "",
       comments: [],
       reviews: [
         Review(
-          id: "PRR_kwDOKtest_thread123",
+          id: "PRR_kwDOKtest_review123",
           author: Author(login: "reviewer"),
           authorAssociation: "MEMBER",
-          body: "Review comment",
+          body: nil,
           submittedAt: "2025-12-18T10:00:00Z",
-          state: "COMMENTED"
+          state: "COMMENTED",
+          comments: [
+            ReviewComment(
+              id: "12345",
+              path: "src/main.swift",
+              line: 42,
+              body: "This needs work",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: "PRRT_kwDOKtest_thread456"
+            )
+          ]
         )
       ]
     )
@@ -264,7 +276,10 @@ struct PRCommentsTests {
     let formatter = PRCommentsFormatter()
     let output = formatter.format(pr, includeBody: false)
 
-    #expect(output.contains("Thread: PRR_kwDOKtest_thread123"))
+    // Thread ID should appear on the comment line, not the review line
+    #expect(output.contains("Thread: PRRT_kwDOKtest_thread456"))
+    // Review ID should NOT appear as "Thread:"
+    #expect(!output.contains("Thread: PRR_"))
   }
 
   @Test("Formatter displays review comment IDs")
