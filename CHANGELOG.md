@@ -2,6 +2,36 @@
 
 All notable changes to promptping-foundation will be documented in this file.
 
+## [0.2.0] - 2025-12-27
+
+### Added
+
+- **GitHub GraphQL Thread Resolution** - Full support for resolving PR review threads
+  - `pr-comments resolve <pr> <thread-id>` command now works for GitHub
+  - Uses `resolveReviewThread` GraphQL mutation
+  - Thread IDs (`PRRT_xxx`) displayed on individual comments for easy copying
+  - Validates thread ID format with helpful error messages
+
+- **GraphQL Integration for GitHub Provider**
+  - `CLIHelper.executeGraphQL()` for running GraphQL queries via `gh api graphql`
+  - Fetches thread IDs from GraphQL and merges with REST API data
+  - Graceful degradation if GraphQL fails (REST-only mode)
+
+### Fixed
+
+- **reply-to command** - Fixed 404 error when replying to review comments
+  - GitHub API requires `POST /pulls/{pr}/comments` with `in_reply_to` parameter
+  - Previously used non-existent `/pulls/comments/{id}/replies` endpoint
+
+- **Thread ID display** - Removed confusing `Thread: PRR_xxx` from review headers
+  - Review IDs (`PRR_`) are NOT thread IDs (`PRRT_`)
+  - Thread IDs now shown only on individual comments where they're actionable
+
+### Changed
+
+- `ReviewComment.path` is now optional to support comments without file context
+- `ReviewComment` has new `threadId` field for GraphQL thread resolution
+
 ## [0.2.0-alpha.1] - 2025-12-23
 
 ### Added
@@ -17,7 +47,7 @@ All notable changes to promptping-foundation will be documented in this file.
   - `view` - Display PR comments with optional translation
   - `reply` - Reply to a PR with optional translation
   - `reply-to` - Reply to a specific comment or thread
-  - `resolve` - Resolve a discussion thread (GitLab/Azure)
+  - `resolve` - Resolve a discussion thread (GitHub, GitLab, Azure)
 
 - **PRComments Library** - Reusable components for PR comment management
   - `PRProvider` protocol with GitHub, GitLab, Azure implementations
