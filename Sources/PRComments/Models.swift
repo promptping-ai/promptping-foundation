@@ -86,6 +86,8 @@ public struct ReviewComment: Codable, Sendable {
   public let createdAt: String
   /// GraphQL thread ID for resolution (e.g., "PRRT_kwDOQo0_Ns6aBcDe")
   public let threadId: String?
+  /// Whether the thread containing this comment is resolved (from GraphQL)
+  public let isResolved: Bool?
 
   public init(
     id: String,
@@ -93,7 +95,8 @@ public struct ReviewComment: Codable, Sendable {
     line: Int?,
     body: String,
     createdAt: String,
-    threadId: String? = nil
+    threadId: String? = nil,
+    isResolved: Bool? = nil
   ) {
     self.id = id
     self.path = path
@@ -101,6 +104,7 @@ public struct ReviewComment: Codable, Sendable {
     self.body = body
     self.createdAt = createdAt
     self.threadId = threadId
+    self.isResolved = isResolved
   }
 }
 

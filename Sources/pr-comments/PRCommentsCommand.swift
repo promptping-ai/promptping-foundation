@@ -60,6 +60,12 @@ struct View: AsyncParsableCommand {
   @Flag(name: .long, help: "Include PR body/description")
   var withBody: Bool = false
 
+  @Flag(name: .long, help: "Show only unresolved review threads")
+  var unresolved: Bool = false
+
+  @Flag(name: .long, help: "Show only resolved review threads")
+  var resolved: Bool = false
+
   @Option(name: .shortAndLong, help: "Repository (owner/repo)")
   var repo: String?
 
@@ -77,6 +83,11 @@ struct View: AsyncParsableCommand {
   var format: OutputFormat = .plain
 
   func run() async throws {
+    // Validate mutually exclusive flags
+    if unresolved && resolved {
+      throw ValidationError("Cannot use --unresolved and --resolved together")
+    }
+
     // Determine PR identifier
     let prIdentifier: String
     if current {
@@ -133,6 +144,11 @@ struct View: AsyncParsableCommand {
         FileHandle.standardError.write(
           "⚠️  Translation.framework not available - showing original text\n".data(using: .utf8)!)
       }
+    }
+
+    // Filter by resolution status if requested
+    if unresolved || resolved {
+      pr = filterByResolutionStatus(pr, showUnresolved: unresolved)
     }
 
     // Format and print

@@ -316,7 +316,8 @@ public struct GitHubProvider: PRProvider {
     if url.contains("git@") {
       let pattern = #"git@[^:]+:([^/]+)/(.+?)(?:\.git)?$"#
       if let match = url.range(of: pattern, options: .regularExpression) {
-        let pathPart = url[match].dropFirst(url.distance(from: url.startIndex, to: match.lowerBound))
+        let pathPart = url[match].dropFirst(
+          url.distance(from: url.startIndex, to: match.lowerBound))
         let components = String(pathPart).components(separatedBy: ":")
         if components.count == 2 {
           let ownerRepo = components[1].replacingOccurrences(of: ".git", with: "")
@@ -376,7 +377,13 @@ public struct GitHubProvider: PRProvider {
     return response.data?.repository?.pullRequest?.reviewThreads.nodes ?? []
   }
 
-  /// Merge GraphQL thread IDs into REST API comments
+  /// Thread info from GraphQL including resolution status
+  private struct ThreadInfo {
+    let id: String
+    let isResolved: Bool
+  }
+
+  /// Merge GraphQL thread IDs and resolution status into REST API comments
   ///
   /// Matches threads to comments by path + line + author
   private func mergeGraphQLThreads(
@@ -385,8 +392,8 @@ public struct GitHubProvider: PRProvider {
   ) -> PullRequest {
     guard !threads.isEmpty else { return pr }
 
-    // Build a lookup map: (path, line, author) -> thread ID
-    var threadLookup: [String: String] = [:]
+    // Build a lookup map: (path, line, author) -> ThreadInfo
+    var threadLookup: [String: ThreadInfo] = [:]
     for thread in threads {
       guard let firstComment = thread.comments.nodes.first,
         let author = firstComment.author?.login,
@@ -394,10 +401,10 @@ public struct GitHubProvider: PRProvider {
       else { continue }
 
       let key = "\(path):\(thread.line ?? 0):\(author)"
-      threadLookup[key] = thread.id
+      threadLookup[key] = ThreadInfo(id: thread.id, isResolved: thread.isResolved)
     }
 
-    // Update reviews with thread IDs
+    // Update reviews with thread IDs and resolution status
     let updatedReviews = pr.reviews.map { review -> Review in
       guard let comments = review.comments else { return review }
 
@@ -405,14 +412,15 @@ public struct GitHubProvider: PRProvider {
         guard let path = comment.path, let line = comment.line else { return comment }
         let key = "\(path):\(line):\(review.author.login)"
 
-        if let threadId = threadLookup[key] {
+        if let threadInfo = threadLookup[key] {
           return ReviewComment(
             id: comment.id,
             path: comment.path,
             line: comment.line,
             body: comment.body,
             createdAt: comment.createdAt,
-            threadId: threadId
+            threadId: threadInfo.id,
+            isResolved: threadInfo.isResolved
           )
         }
         return comment

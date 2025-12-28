@@ -282,6 +282,209 @@ struct PRCommentsTests {
     #expect(!output.contains("Thread: PRR_"))
   }
 
+  @Test("Formatter displays resolution status indicators")
+  func testResolutionStatusDisplay() {
+    // Test that ✅ appears for resolved threads and 🔴 for unresolved
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer"),
+          authorAssociation: "MEMBER",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "COMMENTED",
+          comments: [
+            ReviewComment(
+              id: "123",
+              path: "src/resolved.swift",
+              line: 10,
+              body: "This is resolved",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: "PRRT_resolved",
+              isResolved: true
+            ),
+            ReviewComment(
+              id: "456",
+              path: "src/unresolved.swift",
+              line: 20,
+              body: "This needs work",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: "PRRT_unresolved",
+              isResolved: false
+            ),
+            ReviewComment(
+              id: "789",
+              path: "src/unknown.swift",
+              line: 30,
+              body: "No resolution status",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: nil,
+              isResolved: nil
+            ),
+          ]
+        )
+      ]
+    )
+
+    let formatter = PRCommentsFormatter()
+    let output = formatter.format(pr, includeBody: false)
+
+    // Resolved thread should show ✅
+    #expect(output.contains("src/resolved.swift:10"))
+    #expect(output.contains("✅"))
+
+    // Unresolved thread should show 🔴
+    #expect(output.contains("src/unresolved.swift:20"))
+    #expect(output.contains("🔴"))
+
+    // Unknown resolution should not show either indicator
+    #expect(output.contains("src/unknown.swift:30"))
+  }
+
+  @Test("Filter reviews by resolution status - unresolved only")
+  func testFilterUnresolvedReviews() {
+    // Create a PR with mixed resolution statuses
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer"),
+          authorAssociation: "MEMBER",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "COMMENTED",
+          comments: [
+            ReviewComment(
+              id: "1",
+              path: "resolved.swift",
+              line: 10,
+              body: "Resolved comment",
+              createdAt: "2025-12-18T10:00:00Z",
+              isResolved: true
+            ),
+            ReviewComment(
+              id: "2",
+              path: "unresolved.swift",
+              line: 20,
+              body: "Unresolved comment",
+              createdAt: "2025-12-18T10:00:00Z",
+              isResolved: false
+            ),
+          ]
+        )
+      ]
+    )
+
+    // Filter to show only unresolved
+    let filtered = filterByResolutionStatus(pr, showUnresolved: true)
+
+    // Should have one review with only the unresolved comment
+    #expect(filtered.reviews.count == 1)
+    #expect(filtered.reviews[0].comments?.count == 1)
+    #expect(filtered.reviews[0].comments?[0].path == "unresolved.swift")
+  }
+
+  @Test("Filter reviews by resolution status - resolved only")
+  func testFilterResolvedReviews() {
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer"),
+          authorAssociation: "MEMBER",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "COMMENTED",
+          comments: [
+            ReviewComment(
+              id: "1",
+              path: "resolved.swift",
+              line: 10,
+              body: "Resolved comment",
+              createdAt: "2025-12-18T10:00:00Z",
+              isResolved: true
+            ),
+            ReviewComment(
+              id: "2",
+              path: "unresolved.swift",
+              line: 20,
+              body: "Unresolved comment",
+              createdAt: "2025-12-18T10:00:00Z",
+              isResolved: false
+            ),
+          ]
+        )
+      ]
+    )
+
+    // Filter to show only resolved
+    let filtered = filterByResolutionStatus(pr, showUnresolved: false)
+
+    // Should have one review with only the resolved comment
+    #expect(filtered.reviews.count == 1)
+    #expect(filtered.reviews[0].comments?.count == 1)
+    #expect(filtered.reviews[0].comments?[0].path == "resolved.swift")
+  }
+
+  @Test("Filter removes empty reviews after filtering")
+  func testFilterRemovesEmptyReviews() {
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer1"),
+          authorAssociation: "MEMBER",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "COMMENTED",
+          comments: [
+            ReviewComment(
+              id: "1",
+              path: "resolved.swift",
+              line: 10,
+              body: "Only resolved",
+              createdAt: "2025-12-18T10:00:00Z",
+              isResolved: true
+            )
+          ]
+        ),
+        Review(
+          id: "2",
+          author: Author(login: "reviewer2"),
+          authorAssociation: "MEMBER",
+          body: nil,
+          submittedAt: "2025-12-18T11:00:00Z",
+          state: "CHANGES_REQUESTED",
+          comments: [
+            ReviewComment(
+              id: "2",
+              path: "unresolved.swift",
+              line: 20,
+              body: "Only unresolved",
+              createdAt: "2025-12-18T11:00:00Z",
+              isResolved: false
+            )
+          ]
+        ),
+      ]
+    )
+
+    // Filter to show only unresolved - first review should be removed entirely
+    let filtered = filterByResolutionStatus(pr, showUnresolved: true)
+
+    #expect(filtered.reviews.count == 1)
+    #expect(filtered.reviews[0].author.login == "reviewer2")
+  }
+
   @Test("Formatter displays review comment IDs")
   func testReviewCommentIDDisplay() {
     let pr = PullRequest(
