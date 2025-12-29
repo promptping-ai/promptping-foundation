@@ -38,8 +38,10 @@ public struct AzureProvider: PRProvider {
       let threadsResponse = try decoder.decode(AzureThreadsResponse.self, from: Data(threadsOutput))
       azureThreads = threadsResponse.value
     } catch {
-      // If thread fetch fails, continue with empty threads
-      // This can happen if user doesn't have permissions
+      // Log warning but continue with empty threads (e.g., permissions issue)
+      FileHandle.standardError.write(
+        Data("⚠️ Warning: Failed to fetch PR threads: \(error)\n".utf8)
+      )
     }
 
     return azurePR.toPullRequest(threads: azureThreads)
@@ -126,14 +128,25 @@ extension AzurePR {
   func toPullRequest(threads: [AzurePRThread]) -> PullRequest {
     // Convert Azure threads to our Review model
     let reviews = threads.map { thread in
-      Review(
+      // Map Azure status to Review state:
+      // - "active" or nil (system threads) → PENDING (unresolved)
+      // - "fixed", "closed", etc. → APPROVED (resolved)
+      let reviewState: String
+      if let status = thread.status {
+        reviewState = status == "active" ? "PENDING" : "APPROVED"
+      } else {
+        reviewState = "PENDING"  // System threads without status are treated as pending
+      }
+
+      return Review(
         id: String(thread.id),
         author: Author(login: thread.comments.first?.author.displayName ?? "Unknown"),
         authorAssociation: "CONTRIBUTOR",
         body: thread.comments.first?.content,
-        submittedAt: thread.publishedDate?.id,
-        state: thread.status == "active" ? "PENDING" : "APPROVED",
-        comments: thread.threadContext != nil ? convertToReviewComments(thread: thread) : nil
+        submittedAt: thread.publishedDate,
+        state: reviewState,
+        // Include all thread comments, even without file context (PR-level comments)
+        comments: convertToReviewComments(thread: thread)
       )
     }
 
@@ -149,15 +162,24 @@ extension AzurePR {
   }
 
   private func convertToReviewComments(thread: AzurePRThread) -> [ReviewComment] {
-    guard let context = thread.threadContext else { return [] }
+    // Azure status values: "active", "fixed", "closed", "wontFix", "byDesign", "pending"
+    // System threads (reviewer added, etc.) don't have status - treat as unresolved
+    let resolvedStatuses = ["fixed", "closed", "wontFix", "byDesign"]
+    let isResolved = thread.status.map { resolvedStatuses.contains($0) } ?? false
+
+    // Thread context is optional - PR-level comments don't have file/line info
+    let filePath = thread.threadContext?.filePath ?? ""
+    let line = thread.threadContext?.rightFileStart?.line
 
     return thread.comments.map { comment in
       ReviewComment(
         id: String(comment.id),
-        path: context.filePath ?? "",
-        line: context.rightFileStart?.line,
+        path: filePath,
+        line: line,
         body: comment.content ?? "",
-        createdAt: comment.publishedDate?.id ?? ""
+        createdAt: comment.publishedDate ?? "",
+        threadId: String(thread.id),
+        isResolved: isResolved
       )
     }
   }
@@ -166,10 +188,13 @@ extension AzurePR {
 /// Azure PR Thread structure
 private struct AzurePRThread: Codable {
   let id: Int
-  let status: String  // "active", "closed", "fixed", etc.
+  /// Thread status: "active", "closed", "fixed", "wontFix", "byDesign", "pending"
+  /// Optional because system-generated threads (reviewer added, etc.) don't have status
+  let status: String?
   let comments: [AzurePRComment]
   let threadContext: AzureThreadContext?
-  let publishedDate: AzureDateValue?
+  /// ISO 8601 date string, e.g. "2025-12-29T08:39:23.523Z"
+  let publishedDate: String?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -185,7 +210,8 @@ private struct AzurePRComment: Codable {
   let id: Int
   let author: AzureAuthor
   let content: String?
-  let publishedDate: AzureDateValue?
+  /// ISO 8601 date string, e.g. "2025-12-29T08:39:23.523Z"
+  let publishedDate: String?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -223,14 +249,5 @@ private struct AzureAuthor: Codable {
 
   enum CodingKeys: String, CodingKey {
     case displayName
-  }
-}
-
-/// Azure Date Value (Azure returns dates as objects with string value)
-private struct AzureDateValue: Codable {
-  let id: String
-
-  enum CodingKeys: String, CodingKey {
-    case id
   }
 }
