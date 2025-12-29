@@ -518,3 +518,211 @@ struct PRCommentsTests {
     #expect(output.contains("Sources/Test.swift:42"))
   }
 }
+
+// MARK: - Azure DevOps Provider Tests
+
+@Suite("Azure DevOps Provider Thread Handling")
+struct AzureProviderTests {
+
+  @Test("Azure-style thread data with integer IDs")
+  func testAzureStyleThreadData() {
+    // Azure DevOps uses integer thread IDs (converted to strings)
+    // and status-based resolution
+    let pr = PullRequest(
+      body: "Azure PR description",
+      comments: [],
+      reviews: [
+        Review(
+          id: "12345",  // Azure thread ID (integer as string)
+          author: Author(login: "Alexandre Adriaens"),
+          authorAssociation: "CONTRIBUTOR",
+          body: "I'm rather ok with this solution. However, I have a few questions...",
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "PENDING",  // "active" Azure status maps to PENDING
+          comments: [
+            ReviewComment(
+              id: "67890",  // Azure comment ID (integer as string)
+              path: "Sources/Feature.swift",
+              line: 42,
+              body: "Consider adding error handling here",
+              createdAt: "2025-12-18T10:30:00Z",
+              threadId: "12345",  // Same as review ID for Azure
+              isResolved: false   // "active" status = unresolved
+            )
+          ]
+        )
+      ]
+    )
+
+    // Verify the data structure is correct
+    #expect(pr.reviews.count == 1)
+    #expect(pr.reviews[0].id == "12345")
+    #expect(pr.reviews[0].comments?.count == 1)
+    #expect(pr.reviews[0].comments?[0].threadId == "12345")
+    #expect(pr.reviews[0].comments?[0].isResolved == false)
+  }
+
+  @Test("Azure resolved thread status mapping")
+  func testAzureResolvedStatusMapping() {
+    // Azure "fixed" status should map to isResolved = true
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer"),
+          authorAssociation: "CONTRIBUTOR",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "APPROVED",  // "fixed" Azure status maps to APPROVED
+          comments: [
+            ReviewComment(
+              id: "100",
+              path: "file.swift",
+              line: 10,
+              body: "Fixed",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: "1",
+              isResolved: true  // "fixed" status = resolved
+            )
+          ]
+        )
+      ]
+    )
+
+    #expect(pr.reviews[0].comments?[0].isResolved == true)
+  }
+
+  @Test("Azure PR-level thread without file context")
+  func testAzurePRLevelThread() {
+    // Azure PR-level comments (not attached to specific lines) have empty path and nil line
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "999",
+          author: Author(login: "manager"),
+          authorAssociation: "CONTRIBUTOR",
+          body: "Overall looks good, just a few minor suggestions",
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "PENDING",
+          comments: [
+            ReviewComment(
+              id: "1000",
+              path: "",      // No file path for PR-level comments
+              line: nil,     // No line number
+              body: "Overall looks good, just a few minor suggestions",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: "999",
+              isResolved: false
+            )
+          ]
+        )
+      ]
+    )
+
+    #expect(pr.reviews[0].comments?[0].path == "")
+    #expect(pr.reviews[0].comments?[0].line == nil)
+    #expect(pr.reviews[0].comments?[0].threadId == "999")
+    #expect(pr.reviews[0].comments?[0].isResolved == false)
+  }
+
+  @Test("Azure thread filtering with --unresolved flag")
+  func testAzureUnresolvedFiltering() {
+    // Simulate Azure PR with mixed resolution statuses
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "1",
+          author: Author(login: "reviewer1"),
+          authorAssociation: "CONTRIBUTOR",
+          body: nil,
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "PENDING",
+          comments: [
+            ReviewComment(
+              id: "100",
+              path: "active.swift",
+              line: 10,
+              body: "Still needs work",
+              createdAt: "2025-12-18T10:00:00Z",
+              threadId: "1",
+              isResolved: false  // "active" Azure status
+            )
+          ]
+        ),
+        Review(
+          id: "2",
+          author: Author(login: "reviewer2"),
+          authorAssociation: "CONTRIBUTOR",
+          body: nil,
+          submittedAt: "2025-12-18T11:00:00Z",
+          state: "APPROVED",
+          comments: [
+            ReviewComment(
+              id: "200",
+              path: "fixed.swift",
+              line: 20,
+              body: "Done",
+              createdAt: "2025-12-18T11:00:00Z",
+              threadId: "2",
+              isResolved: true  // "fixed" Azure status
+            )
+          ]
+        ),
+      ]
+    )
+
+    // Filter to show only unresolved (simulating --unresolved flag)
+    let filtered = filterByResolutionStatus(pr, showUnresolved: true)
+
+    #expect(filtered.reviews.count == 1)
+    #expect(filtered.reviews[0].id == "1")
+    #expect(filtered.reviews[0].comments?[0].path == "active.swift")
+  }
+
+  @Test("Azure thread displays correctly in formatter")
+  func testAzureThreadFormatting() {
+    let pr = PullRequest(
+      body: "",
+      comments: [],
+      reviews: [
+        Review(
+          id: "12345",
+          author: Author(login: "ADRIAENS Alexandre"),
+          authorAssociation: "CONTRIBUTOR",
+          body: "I have a question about this approach",
+          submittedAt: "2025-12-18T10:00:00Z",
+          state: "PENDING",
+          comments: [
+            ReviewComment(
+              id: "67890",
+              path: "Sources/App/Feature.swift",
+              line: 156,
+              body: "Should we use a protocol here instead?",
+              createdAt: "2025-12-18T10:30:00Z",
+              threadId: "12345",
+              isResolved: false
+            )
+          ]
+        )
+      ]
+    )
+
+    let formatter = PRCommentsFormatter()
+    let output = formatter.format(pr, includeBody: false)
+
+    // Should show Azure-style thread ID
+    #expect(output.contains("Thread: 12345"))
+    // Should show unresolved indicator
+    #expect(output.contains("🔴"))
+    // Should show file location
+    #expect(output.contains("Sources/App/Feature.swift:156"))
+    // Should show author name
+    #expect(output.contains("@ADRIAENS Alexandre"))
+  }
+}
