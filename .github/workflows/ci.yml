@@ -1,3 +1,4 @@
+# CI workflow using shared workflows from promptping-ai/.github
 name: CI
 
 on:
@@ -22,6 +23,5 @@ jobs:
     secrets: inherit
 
   review:
-    if: github.event_name == 'pull_request' && github.event.action == 'opened'
     uses: promptping-ai/.github/.github/workflows/swift-review.yml@v1
     secrets: inherit
