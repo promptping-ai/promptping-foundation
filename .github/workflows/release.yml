@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   release:
-    uses: promptping-ai/.github/.github/workflows/swift-release.yml@main
+    uses: promptping-ai/.github/.github/workflows/swift-release.yml@v1
     with:
       tools-macos: "pr-comments bump-version install-daemon"
       tools-linux: "pr-comments bump-version"
