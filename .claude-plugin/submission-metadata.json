@@ -1,0 +1,43 @@
+{
+  "id": "ai.promptping.foundation",
+  "category": "development-tools",
+  "subcategories": ["cli", "git", "automation"],
+  "icon": "https://github.com/promptping-ai/promptping-foundation/raw/main/.claude-plugin/icon.png",
+  "screenshots": [],
+  "requirements": {
+    "os": ["macos-14", "macos-15", "linux"],
+    "claudeCode": ">=1.0.0",
+    "dependencies": {
+      "gh": "GitHub CLI for pr-comments GitHub integration",
+      "glab": "GitLab CLI for pr-comments GitLab integration (optional)",
+      "az": "Azure CLI for pr-comments Azure DevOps integration (optional)"
+    }
+  },
+  "features": [
+    {
+      "icon": "💬",
+      "title": "PR Comments",
+      "description": "View, reply to, and resolve PR comments across GitHub, GitLab, and Azure DevOps"
+    },
+    {
+      "icon": "🔢",
+      "title": "Version Bumping",
+      "description": "Semantic version management with Git tagging and GitHub release creation"
+    },
+    {
+      "icon": "🚀",
+      "title": "Daemon Management",
+      "description": "Install and manage MCP servers as macOS launchd services"
+    },
+    {
+      "icon": "🌐",
+      "title": "Translation",
+      "description": "On-device translation for PR comments using Apple Translation.framework (macOS)"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/promptping-ai/promptping-foundation/issues",
+    "documentation": "https://github.com/promptping-ai/promptping-foundation#readme"
+  },
+  "changelog": "https://github.com/promptping-ai/promptping-foundation/blob/main/CHANGELOG.md"
+}

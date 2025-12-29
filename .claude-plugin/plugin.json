@@ -1,0 +1,42 @@
+{
+  "name": "promptping-foundation",
+  "version": "0.2.1",
+  "description": "CLI tools for PR comments, version bumping, and daemon management",
+  "author": {
+    "name": "PromptPing",
+    "email": "support@promptping.ai"
+  },
+  "homepage": "https://github.com/promptping-ai/promptping-foundation",
+  "repository": "https://github.com/promptping-ai/promptping-foundation",
+  "license": "MIT",
+  "keywords": [
+    "pr-comments",
+    "version-bump",
+    "daemon",
+    "launchd",
+    "cli",
+    "github",
+    "gitlab",
+    "azure-devops"
+  ],
+  "products": [
+    {
+      "name": "pr-comments",
+      "type": "cli",
+      "description": "View, reply, and resolve PR comments across GitHub/GitLab/Azure DevOps",
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "name": "bump-version",
+      "type": "cli",
+      "description": "Semantic version bumping with Git integration and GitHub release creation",
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "name": "install-daemon",
+      "type": "cli",
+      "description": "Install MCP servers with macOS launchd service management",
+      "platforms": ["macos"]
+    }
+  ]
+}
