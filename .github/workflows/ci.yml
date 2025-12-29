@@ -14,14 +14,14 @@ permissions:
 
 jobs:
   ci:
-    uses: promptping-ai/.github/.github/workflows/graphite-swift-ci.yml@main
+    uses: promptping-ai/.github/.github/workflows/graphite-swift-ci.yml@v1
     secrets: inherit
 
   rules:
-    uses: promptping-ai/.github/.github/workflows/swift-rules-check.yml@main
+    uses: promptping-ai/.github/.github/workflows/swift-rules-check.yml@v1
     secrets: inherit
 
   review:
     if: github.event_name == 'pull_request' && github.event.action == 'opened'
-    uses: promptping-ai/.github/.github/workflows/swift-review.yml@main
+    uses: promptping-ai/.github/.github/workflows/swift-review.yml@v1
     secrets: inherit
