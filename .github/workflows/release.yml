@@ -3,133 +3,14 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 0.2.1)'
-        required: true
 
 permissions:
   contents: write
 
-env:
-  TOOLS_MACOS: "pr-comments bump-version install-daemon"
-  TOOLS_LINUX: "pr-comments bump-version"
-
 jobs:
-  build-macos:
-    name: Build macOS (${{ matrix.arch }})
-    strategy:
-      matrix:
-        arch: [arm64, x86_64]
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build
-        run: swift build -c release --arch ${{ matrix.arch }}
-
-      - name: Package binaries
-        run: |
-          VERSION=${{ github.event.inputs.version || github.ref_name }}
-          VERSION=${VERSION#v}
-
-          for tool in $TOOLS_MACOS; do
-            echo "Packaging $tool..."
-            mkdir -p release/$tool
-            cp .build/${{ matrix.arch }}-apple-macosx/release/$tool release/$tool/
-            # Strip debug symbols
-            strip release/$tool/$tool
-            tar -czvf ${tool}-${VERSION}-macos-${{ matrix.arch }}.tar.gz -C release $tool
-            rm -rf release/$tool
-          done
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: "*.tar.gz"
-
-  build-linux:
-    name: Build Linux (x86_64)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.0"
-
-      - name: Install musl SDK
-        run: |
-          swift sdk install x86_64-swift-linux-musl
-
-      - name: Build
-        run: |
-          # Only build pr-comments and bump-version (install-daemon requires launchd)
-          for tool in $TOOLS_LINUX; do
-            echo "Building $tool..."
-            swift build -c release --swift-sdk x86_64-swift-linux-musl --product $tool
-          done
-
-      - name: Package binaries
-        run: |
-          VERSION=${{ github.event.inputs.version || github.ref_name }}
-          VERSION=${VERSION#v}
-
-          for tool in $TOOLS_LINUX; do
-            echo "Packaging $tool..."
-            mkdir -p release/$tool
-            cp .build/x86_64-unknown-linux-musl/release/$tool release/$tool/
-            # Strip debug symbols
-            strip release/$tool/$tool
-            tar -czvf ${tool}-${VERSION}-linux-x86_64.tar.gz -C release $tool
-            rm -rf release/$tool
-          done
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-x86_64
-          path: "*.tar.gz"
-
   release:
-    name: Create Release
-    needs: [build-macos, build-linux]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Prepare release files
-        run: |
-          mkdir -p release
-          mv artifacts/*/*.tar.gz release/
-
-      - name: Create checksums
-        run: |
-          cd release
-          sha256sum *.tar.gz > checksums.txt
-          cat checksums.txt
-
-      - name: Extract changelog
-        id: changelog
-        run: |
-          VERSION=${{ github.event.inputs.version || github.ref_name }}
-          VERSION=${VERSION#v}
-          # Extract section for this version from CHANGELOG.md
-          awk "/## \[${VERSION}\]/{flag=1; next} /## \[/{flag=0} flag" CHANGELOG.md > release_notes.md || true
-          if [ ! -s release_notes.md ]; then
-            echo "Release ${VERSION}" > release_notes.md
-          fi
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          body_path: release_notes.md
-          generate_release_notes: false
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+    uses: promptping-ai/.github/.github/workflows/swift-release.yml@main
+    with:
+      tools-macos: "pr-comments bump-version install-daemon"
+      tools-linux: "pr-comments bump-version"
+    secrets: inherit

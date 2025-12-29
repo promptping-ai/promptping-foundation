@@ -13,18 +13,6 @@ permissions:
   checks: write
 
 jobs:
-  # Explicit build/test job - visible on PR status checks
-  build-test:
-    name: Build & Test
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: swift build
-      - name: Test
-        run: swift test
-
-  # Reusable workflows for org-wide consistency
   ci:
     uses: promptping-ai/.github/.github/workflows/graphite-swift-ci.yml@main
     secrets: inherit
