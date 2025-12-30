@@ -6,7 +6,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -21,6 +20,9 @@ jobs:
   rules:
     uses: promptping-ai/.github/.github/workflows/swift-rules-check.yml@v1
     secrets: inherit
+
+  workflow-lint:
+    uses: promptping-ai/.github/.github/workflows/workflow-lint.yml@v1
 
   review:
     uses: promptping-ai/.github/.github/workflows/swift-review.yml@v1
